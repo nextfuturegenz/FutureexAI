@@ -1,0 +1,6 @@
+transformers
+torch
+faiss-cpu
+sentence-transformers
+torch-geometric
+networkx
