@@ -9,8 +9,8 @@ from models.vision import VisionModule
 
 # Optional: Mount Google Drive if running in Google Colab.
 # Uncomment these lines when using Colab.
-# from google.colab import drive
-# drive.mount('/content/drive')
+from google.colab import drive
+drive.mount('/content/drive')
 
 def load_data():
     """
