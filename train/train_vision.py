@@ -1,5 +1,9 @@
 # CNN for vision (Occipital Lobe)
+import sys
 import os
+
+# Add the parent directory (project root) to the system path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import tensorflow as tf
 from models.vision import VisionModule
 
