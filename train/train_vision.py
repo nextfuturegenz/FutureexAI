@@ -10,7 +10,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import tensorflow as tf
 import numpy as np
-from models.vision import VisionModule
+from model.vision import VisionModule
 
 def load_data():
     """
