@@ -1,48 +1,35 @@
-import torch
-from transformers import AutoTokenizer
-from models.rag import RAGRetriever
-from models.moe import MixtureOfExperts
-from models.memory import ConversationMemory
-from models.gnn import GNNModel
-from models.hybrid import HybridModel
-from utils.config import EXPERT_CONFIGS, KNOWLEDGE_DATA
-import networkx as nx
-
-def create_knowledge_graph():
-    # Create a simple knowledge graph using networkx
-    G = nx.Graph()
-    G.add_edges_from([
-        ("AI", "Machine Learning"),
-        ("Machine Learning", "Deep Learning"),
-        ("AI", "Neural Networks"),
-        ("Elon Musk", "Tesla"),
-        ("Elon Musk", "SpaceX")
-    ])
-    # Convert to edge_index (PyTorch Geometric format)
-    edge_index = torch.tensor(list(G.edges), dtype=torch.long).t().contiguous()
-    # Create node features (random for demonstration)
-    x = torch.rand((len(G.nodes), 16))
-    return x, edge_index
+import numpy as np
+from pipeline.integrate import BrainAI
 
 def main():
-    # Initialize the tokenizer
-    model_name = "mistralai/Mistral-7B-Instruct-v0.1"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    # Initialize the hybrid brain-inspired AI model
+    brain = BrainAI()
+    print("Brain AI model initialized successfully!")
     
-    # Initialize modules
-    rag_retriever = RAGRetriever(KNOWLEDGE_DATA)
-    moe_model = MixtureOfExperts(EXPERT_CONFIGS)
-    memory_model = ConversationMemory()
-    x, edge_index = create_knowledge_graph()
-    gnn_model = GNNModel(input_dim=16, hidden_dim=32, output_dim=16)
+    # Create dummy inputs for testing each module
+    # Dummy image: Assuming shape (batch, height, width, channels)
+    dummy_image = np.random.rand(1, 224, 224, 3).astype('float32')
     
-    # Build the hybrid model
-    hybrid_model = HybridModel(rag_retriever, moe_model, memory_model, gnn_model, tokenizer)
+    # Dummy text input: Using a dictionary that mimics Hugging Face tokenized output
+    # (For example, using input_ids and attention_mask)
+    dummy_text = {
+        "input_ids": np.array([[101, 2054, 2003, 1996, 2561, 102]]),  # Example token IDs
+        "attention_mask": np.array([[1, 1, 1, 1, 1, 1]])
+    }
     
-    # Example inference
-    user_input = "Tell me about artificial intelligence."
-    response = hybrid_model.generate_response(user_input, x, edge_index)
-    print("Response:", response)
+    # Dummy environment state for the Decision Module (e.g., a feature vector)
+    dummy_env_state = np.random.rand(1, 10).astype('float32')
+    
+    # Dummy motor control input for the LSTM (shape: batch, time steps, features)
+    dummy_motor_input = np.random.rand(1, 10, 10).astype('float32')
+
+    # Perform a forward pass through the integrated model
+    outputs = brain.forward(dummy_image, dummy_text, dummy_env_state, dummy_motor_input)
+    
+    # Display the outputs from each module
+    print("Model outputs:")
+    for key, value in outputs.items():
+        print(f"{key}: {value}")
 
 if __name__ == "__main__":
     main()

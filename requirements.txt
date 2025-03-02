@@ -1,6 +1,21 @@
+# TensorFlow framework
+tensorflow>=2.8.0
+
+# Hugging Face Transformers for pre-trained language models
 transformers
-torch
-faiss-cpu
-sentence-transformers
-torch-geometric
-networkx
+
+# TensorFlow Datasets for loading and processing data
+tensorflow-datasets
+
+# TF-Agents for reinforcement learning (if needed)
+tf-agents
+
+# Graph processing library (if needed for GNN integration)
+dgl
+
+# Basic utilities
+numpy
+pandas
+
+# For image processing (optional, if using OpenCV in your vision pipeline)
+opencv-python
