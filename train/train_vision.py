@@ -5,7 +5,7 @@ import os
 # Add the parent directory (project root) to the system path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import tensorflow as tf
-from models.vision import VisionModule
+from model.vision import VisionModule
 
 # Optional: Mount Google Drive if running in Google Colab.
 # Uncomment these lines when using Colab.
