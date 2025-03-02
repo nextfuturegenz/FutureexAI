@@ -1,16 +1,16 @@
-# CNN for vision (Occipital Lobe)
-import sys
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-# Add the parent directory (project root) to the system path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import tensorflow as tf
-from model.vision import VisionModule
+import sys
 
-# Optional: Mount Google Drive if running in Google Colab.
-# Uncomment these lines when using Colab.
-# from google.colab import drive
-# drive.mount('/content/drive')
+# Force TensorFlow to use the CPU and suppress GPU-related logs.
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # 0: all messages, 1: INFO, 2: WARNING, 3: ERROR
+
+# Add project root to the system path so that models can be found.
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import tensorflow as tf
+import numpy as np
+from models.vision import VisionModule
 
 def load_data():
     """
@@ -19,11 +19,11 @@ def load_data():
     """
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
     
-    # Normalize the pixel values to [0,1]
+    # Normalize pixel values to [0,1]
     x_train = x_train.astype("float32") / 255.0
     x_test = x_test.astype("float32") / 255.0
 
-    # Resize images to 224x224 (required by our VisionModule)
+    # Resize images to 224x224 (this may consume more memory; consider reducing size for testing)
     x_train = tf.image.resize(x_train, (224, 224))
     x_test = tf.image.resize(x_test, (224, 224))
     
@@ -66,17 +66,10 @@ def load_model(model_dir):
         return None
 
 def main():
-    # Define the directory where the model will be saved.
-    # Adjust the path to your Google Drive location if running on Colab.
     model_dir = './saved_models/vision_model'
-    # For Google Colab, it might look like:
-    # model_dir = '/content/drive/MyDrive/brain_ai_tf/saved_models/vision_model'
-    
-    # Try loading an existing model
     model = load_model(model_dir)
     
     if model is None:
-        # Load data
         (x_train, y_train), (x_test, y_test) = load_data()
     
         # Build the model
@@ -92,13 +85,13 @@ def main():
         # Display the model's architecture
         model.summary()
     
-        # Train the model for 10 epochs
-        model.fit(x_train, y_train, epochs=10, validation_data=(x_test, y_test))
+        # Train the model with a reduced batch size to mitigate memory issues
+        model.fit(x_train, y_train, batch_size=16, epochs=10, validation_data=(x_test, y_test))
     
         # Save the model after training
         save_model(model, model_dir)
     else:
-        # If the model was loaded successfully, you can evaluate or further train it.
+        # Evaluate the loaded model
         (x_train, y_train), (x_test, y_test) = load_data()
         loss, acc = model.evaluate(x_test, y_test)
         print(f"Loaded model test accuracy: {acc:.4f}")
