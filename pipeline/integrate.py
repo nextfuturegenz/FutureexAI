@@ -2,13 +2,13 @@ import tensorflow as tf
 
 class BrainAI:
     def __init__(self):
-        # Import the individual modules from the models package.
-        from models.vision import VisionModule
-        from models.language import LanguageModule
-        from models.decision import DecisionModule
-        from models.motor import MotorControl
-        from models.memory import MemoryModule
-        from models.routing import RoutingModule
+        # Import the individual modules from the model package.
+        from model.vision import VisionModule
+        from model.language import LanguageModule
+        from model.decision import DecisionModule
+        from model.motor import MotorControl
+        from model.memory import MemoryModule
+        from model.routing import RoutingModule
 
         # Instantiate each module.
         self.vision = VisionModule()            # e.g., a CNN for image feature extraction.
