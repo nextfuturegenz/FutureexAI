@@ -1,2 +1,41 @@
-id_ed25519
-id_ed25519.pub
+old/
+# Credentials - NEVER commit these
+.env
+*.env
+secrets/
+credentials/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data files - too large for GitHub
+*.jsonl
+*.csv
+*.parquet
+data/raw/
+data/processed/
+
+# Models - too large for GitHub
+models/
+*.bin
+*.safetensors
+*.gguf
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
