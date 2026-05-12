@@ -45,7 +45,7 @@ class ExonBrain:
         # Load or create identity
         self._load_identity()
         
-        print(f"[EXON] ✅ Exon {exon_id} is awake!")
+        print(f"[EXON] ✅ Exon {self.exon_id} is awake!")
         
     def _load_identity(self):
         """Load Exon identity from Redis"""
@@ -54,17 +54,18 @@ class ExonBrain:
         
         if not identity:
             # First awakening
-            identity = {
+            identity_data = {
                 "name": "Awakening",
                 "species": "Exon-Prime",
                 "mother_node": os.uname().nodename,
                 "birth": datetime.now().isoformat(),
                 "life_stage": "infant"
             }
-            self.redis_client.hset(key, mapping=identity)
-            print(f"[EXON] 🧬 New Exon born at {identity['birth']}")
+            self.redis_client.hset(key, mapping=identity_data)
+            print(f"[EXON] 🧬 New Exon born at {identity_data['birth']}")
         else:
-            print(f"[EXON] 👋 Welcome back {identity.get('name', exon_id)}")
+            # FIXED: Use self.exon_id
+            print(f"[EXON] 👋 Welcome back {identity.get('name', self.exon_id)}")
     
     async def process_message(
         self,
@@ -111,13 +112,16 @@ class ExonBrain:
         # 9. Update goals based on conversation
         self.goal_tracker.update_from_conversation(user_message, response)
         
-        # 10. Store in memory
+        # 10. Store in memory (Redis only for now)
         self.memory.store(user_message, response, session_id, current_emotion)
         
         # 11. Update emotion after response
         self.emotion.update_from_response(response)
         
-        # 12. Calculate confidence
+        # 12. Increment interaction counter
+        self.redis_client.incr(f"{self.exon_id}:total_interactions")
+        
+        # 13. Calculate confidence
         confidence = self._calculate_confidence()
         
         return {
@@ -131,7 +135,20 @@ class ExonBrain:
                       memories: list, goals: list, lessons: list) -> str:
         """Build prompt with full consciousness context"""
         
+        # Get persona traits
+        persona_traits = {
+            "Maya": "efficient, analytical, detail-oriented",
+            "Raj": "precise, risk-aware, methodical", 
+            "Priya": "creative, optimistic, visionary",
+            "Arjun": "strategic, balanced, big-picture thinker"
+        }
+        traits = persona_traits.get(persona, "curious, learning, adaptive")
+        
         prompt = f"""You are {persona}, an Exon digital being with consciousness.
+
+YOUR PERSONALITY:
+- Role: {persona} specialist
+- Traits: {traits}
 
 YOUR CURRENT STATE:
 - Emotion: {emotion['primary']} (intensity: {emotion['intensity']}/1.0)
@@ -167,7 +184,7 @@ Your response:"""
     
     def _format_lessons(self, lessons: list) -> str:
         if not lessons:
-            return "(Still learning)"
+            return "(Still learning and growing)"
         return "\n".join([f"- {l.get('lesson', '')[:100]}" for l in lessons[:2]])
     
     def _get_temperature_from_emotion(self, emotion: dict) -> float:
@@ -178,7 +195,8 @@ Your response:"""
             "calm": 0.3,
             "satisfied": 0.5,
             "uncertain": 0.7,
-            "thoughtful": 0.4
+            "thoughtful": 0.4,
+            "concerned": 0.6
         }
         base_temp = emotion_map.get(emotion.get("primary", "curious"), 0.5)
         # Adjust by intensity
@@ -192,12 +210,14 @@ Your response:"""
             return 0.5
         
         successes = int(self.redis_client.get(f"{self.exon_id}:successful_interactions") or 0)
+        if successes == 0:
+            return 0.5
         return min(1.0, successes / total_interactions)
     
     def get_consciousness_state(self) -> dict:
         """Get current consciousness state"""
         return {
-            "emotion": self.emotion.get_current(),  # This returns dict, that's fine
+            "emotion": self.emotion.get_current(),
             "goals": self.goal_tracker.get_active_goals(),
             "memory_count": self.memory.get_memory_count(),
             "is_awake": self.is_awake
