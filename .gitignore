@@ -1,4 +1,3 @@
-old/
 # Credentials - NEVER commit these
 .env
 *.env

@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  exon-api:
+    build:
+      context: ..   # Build from parent (FutureexAI root)
+      dockerfile: exon/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - DB_HOST=postgres
+      - OLLAMA_HOST=http://ollama:11434
+      - FUTUREEX_PATH=/app
+    volumes:
+      - ../:/app   # Mount whole repo so code changes reflect
+    depends_on:
+      - redis
+      - postgres
+      - ollama
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 2gb
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: futureex
+      POSTGRES_USER: futureex
+      POSTGRES_PASSWORD: futureex123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../exon/migrations:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    command: serve
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:
+  ollama_data:
