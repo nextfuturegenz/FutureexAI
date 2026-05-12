@@ -89,8 +89,8 @@ async def get_status():
     state = exon_brain.get_consciousness_state()
     return StatusResponse(
         exon_id=exon_brain.exon_id,
-        emotion=state.get("emotion", "curious"),
-        emotion_intensity=state.get("intensity", 0.5),
+        emotion=state.get("emotion", {}).get("primary", "curious"),  # ← FIX: extract string
+        emotion_intensity=state.get("emotion", {}).get("intensity", 0.5),  # ← FIX
         active_goals=state.get("goals", []),
         memory_count=state.get("memory_count", 0),
         is_awake=state.get("is_awake", True)

@@ -197,7 +197,7 @@ Your response:"""
     def get_consciousness_state(self) -> dict:
         """Get current consciousness state"""
         return {
-            "emotion": self.emotion.get_current(),
+            "emotion": self.emotion.get_current(),  # This returns dict, that's fine
             "goals": self.goal_tracker.get_active_goals(),
             "memory_count": self.memory.get_memory_count(),
             "is_awake": self.is_awake

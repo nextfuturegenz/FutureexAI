@@ -30,7 +30,7 @@ class MemoryManager:
     
     def store(self, user_message: str, ai_response: str, session_id: Optional[str], emotion: dict):
         """Store conversation in both Redis (recent) and PostgreSQL (permanent)"""
-        
+    
         memory_entry = {
             "user": user_message,
             "assistant": ai_response,
@@ -38,20 +38,20 @@ class MemoryManager:
             "timestamp": datetime.now().isoformat(),
             "session_id": session_id
         }
-        
+    
         # Store in Redis (working memory)
         redis_key = f"{self.exon_id}:memory:recent"
         self.redis_client.lpush(redis_key, json.dumps(memory_entry))
-        self.redis_client.ltrim(redis_key, 0, 49)  # Keep last 50
+        self.redis_client.ltrim(redis_key, 0, 49)
         
-        # Store in PostgreSQL (long-term)
+        # Store in PostgreSQL (long-term) - use exon_str_id
         try:
             cursor = self.pg_conn.cursor()
             cursor.execute("""
                 INSERT INTO exon_memories (exon_id, memory_type, content, emotion_at_time, created_at)
                 VALUES (%s, %s, %s, %s, %s)
             """, (
-                self.exon_id,
+                self.exon_id,  # Now string "EXN-001"
                 "conversation",
                 json.dumps(memory_entry),
                 emotion.get("primary"),
@@ -61,7 +61,9 @@ class MemoryManager:
             cursor.close()
         except Exception as e:
             print(f"[MEMORY] PG store error: {e}")
-    
+            # Rollback on error
+            self.pg_conn.rollback()
+
     def recall(self, keyword: str, limit: int = 5) -> List[Dict]:
         """Recall relevant memories based on keyword"""
         memories = []
@@ -80,7 +82,7 @@ class MemoryManager:
                 cursor = self.pg_conn.cursor()
                 cursor.execute("""
                     SELECT content FROM exon_memories 
-                    WHERE exon_id = %s AND content LIKE %s
+                    WHERE exon_id = %s AND content::text LIKE %s
                     ORDER BY created_at DESC LIMIT %s
                 """, (self.exon_id, f"%{keyword}%", limit - len(memories)))
                 
@@ -89,7 +91,8 @@ class MemoryManager:
                 cursor.close()
             except Exception as e:
                 print(f"[MEMORY] PG recall error: {e}")
-        
+                self.pg_conn.rollback()
+    
         return memories
     
     def get_recent_memories(self, limit: int = 10) -> List[Dict]:
