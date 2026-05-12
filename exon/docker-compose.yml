@@ -3,26 +3,18 @@ services:
     build:
       context: ..
       dockerfile: exon/Dockerfile
-    ports:
-      - "8000:8000"
+    network_mode: host  # This makes container use host's network directly
     environment:
-      - REDIS_HOST=host.docker.internal
+      - REDIS_HOST=localhost
       - REDIS_PORT=6379
-      - DB_HOST=host.docker.internal
+      - DB_HOST=localhost
       - DB_PORT=5432
       - DB_NAME=brain
       - DB_USER=master
       - DB_PASSWORD=2307
-      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_HOST=http://localhost:11434
       - OLLAMA_MODEL=phi3:mini
       - EXON_ID=EXN-001
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ../:/app
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
