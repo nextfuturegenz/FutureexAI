@@ -1,57 +1,28 @@
-version: '3.8'
-
 services:
   exon-api:
     build:
-      context: ..   # Build from parent (FutureexAI root)
+      context: ..
       dockerfile: exon/Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - REDIS_HOST=redis
-      - DB_HOST=postgres
-      - OLLAMA_HOST=http://ollama:11434
-      - FUTUREEX_PATH=/app
+      - REDIS_HOST=host.docker.internal
+      - REDIS_PORT=6379
+      - DB_HOST=host.docker.internal
+      - DB_PORT=5432
+      - DB_NAME=brain
+      - DB_USER=master
+      - DB_PASSWORD=2307
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_MODEL=phi3:mini
+      - EXON_ID=EXN-001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - ../:/app   # Mount whole repo so code changes reflect
-    depends_on:
-      - redis
-      - postgres
-      - ollama
+      - ../:/app
     restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes --maxmemory 2gb
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: futureex
-      POSTGRES_USER: futureex
-      POSTGRES_PASSWORD: futureex123
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ../exon/migrations:/docker-entrypoint-initdb.d
-    restart: unless-stopped
-
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    command: serve
-    restart: unless-stopped
-
-volumes:
-  redis_data:
-  postgres_data:
-  ollama_data:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

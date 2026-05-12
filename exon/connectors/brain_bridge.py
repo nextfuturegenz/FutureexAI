@@ -1,46 +1,83 @@
 """
-Connects Exon to your old/model modules (Decision, Language, Memory, etc.)
+Brain Bridge - Connects Exon to your existing old/model modules
 """
 
 import sys
 import os
-import numpy as np
-import tensorflow as tf
 
-FUTUREEX_PATH = os.environ.get("FUTUREEX_PATH", "/home/nfg/FutureexAI")
-sys.path.insert(0, FUTUREEX_PATH)
-
-from old.model.decision import DecisionModule
-from old.model.language import LanguageModule
-from old.model.memory import MemoryModule
-from old.model.routing import RoutingModule
+# Add parent directory to path
+PARENT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, PARENT_DIR)
 
 
 class BrainBridge:
-    """Wrapper around your existing brain modules."""
-
+    """Wrapper around your existing brain modules"""
+    
     def __init__(self):
-        self.language = LanguageModule(model_name="bert-base-uncased")
-        self.memory = MemoryModule(input_size=128, memory_size=100)
-        self.decision = DecisionModule(input_dim=128, num_actions=10)
-        self.routing = RoutingModule(input_dim=384, output_dim=256)
-
-        # Note: we don't load actual BERT weights here to save memory;
-        # the LanguageModule will lazy-load. If you want to preload, call
-        # self.language.transformer etc.
-
-    def get_embedding(self, text: str) -> np.ndarray:
-        """Get semantic embedding using your LanguageModule."""
-        tokenized = self.language.tokenize([text])
-        features = self.language(
-            tokenized["input_ids"],
-            tokenized["attention_mask"],
-            training=False
-        )
-        return features.numpy()[0]
-
-    def augment_with_memory(self, embedding: np.ndarray) -> np.ndarray:
-        """Apply your MemoryModule to embedding."""
-        emb_tensor = tf.convert_to_tensor(embedding.reshape(1, -1), dtype=tf.float32)
-        memory_output = self.memory(emb_tensor, training=False)
-        return memory_output.numpy().flatten()
+        self.modules_available = False
+        self.language = None
+        self.memory = None
+        self.decision = None
+        
+        try:
+            # Try to import your existing modules
+            from old.model.language import LanguageModule
+            from old.model.memory import MemoryModule
+            from old.model.decision import DecisionModule
+            
+            # Initialize with dummy values to test
+            self.language = LanguageModule(model_name="bert-base-uncased")
+            self.memory = MemoryModule(input_size=128, memory_size=100)
+            self.decision = DecisionModule(input_dim=128, num_actions=10)
+            
+            self.modules_available = True
+            print("[BRAIN] Successfully loaded your existing brain modules")
+        except Exception as e:
+            print(f"[BRAIN] Could not load existing modules: {e}")
+            print("[BRAIN] Using mock implementations")
+            self.modules_available = False
+    
+    def get_embedding(self, text: str):
+        """Get semantic embedding of text"""
+        if self.modules_available and self.language:
+            try:
+                tokenized = self.language.tokenize([text])
+                features = self.language(
+                    tokenized["input_ids"],
+                    tokenized["attention_mask"],
+                    training=False
+                )
+                return features.numpy()
+            except Exception as e:
+                print(f"[BRAIN] Embedding error: {e}")
+        
+        # Mock embedding
+        import numpy as np
+        return np.random.rand(1, 128)
+    
+    def augment_with_memory(self, embedding):
+        """Augment embedding with memory"""
+        if self.modules_available and self.memory:
+            try:
+                import tensorflow as tf
+                emb_tensor = tf.convert_to_tensor(embedding, dtype=tf.float32)
+                result = self.memory(emb_tensor, training=False)
+                return result.numpy()
+            except Exception as e:
+                print(f"[BRAIN] Memory augmentation error: {e}")
+        
+        return embedding
+    
+    def decide_action(self, state_vector):
+        """Make decision based on state"""
+        if self.modules_available and self.decision:
+            try:
+                import tensorflow as tf
+                state_tensor = tf.convert_to_tensor(state_vector, dtype=tf.float32)
+                q_values = self.decision(state_tensor, training=False)
+                return q_values.numpy()
+            except Exception as e:
+                print(f"[BRAIN] Decision error: {e}")
+        
+        # Mock decision
+        return [0.5] * 10
