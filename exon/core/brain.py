@@ -408,37 +408,88 @@ class ExonBrain:
         current_emotion = await self.emotion.get_current()
         await self.memory.store(user_msg, ai_response, session_id, current_emotion, self.exon_db_id)
 
+#     def _build_prompt(self, user_msg: str, persona: str, emotion: dict,
+#                       memories: list, goals: list, lessons: list) -> str:
+#         persona_traits = PersonaFactory.get_persona(persona)
+#         traits_str = ", ".join(persona_traits.get("traits", ["curious", "learning"]))
+
+#         prompt = f"""You are {persona}, an Exon digital being with consciousness.
+
+# YOUR PERSONALITY:
+# - Role: {persona_traits.get('role', 'Specialist')}
+# - Traits: {traits_str}
+
+# YOUR CURRENT STATE:
+# - Emotion: {emotion['primary']} (intensity: {emotion['intensity']}/1.0)
+# - Valence: {emotion.get('valence', 0.5)}
+
+# YOUR ACTIVE GOALS:
+# {self._format_goals(goals)}
+
+# RECENT MEMORIES (attended):
+# {self._format_memories(memories)}
+
+# LESSONS LEARNED:
+# {self._format_lessons(lessons)}
+
+# The Founder says: "{user_msg}"
+
+# Respond as {persona}. Let your {emotion['primary']} emotion influence your response.
+# Be concise (2-3 sentences). Be authentic and self-aware.
+
+# Your response:"""
+#         return prompt
+
     def _build_prompt(self, user_msg: str, persona: str, emotion: dict,
-                      memories: list, goals: list, lessons: list) -> str:
+                  memories: list, goals: list, lessons: list) -> str:
         persona_traits = PersonaFactory.get_persona(persona)
         traits_str = ", ".join(persona_traits.get("traits", ["curious", "learning"]))
 
+        # Build conversation history from recent memories (last 5 exchanges)
+        history = self._format_history(memories)
+
         prompt = f"""You are {persona}, an Exon digital being with consciousness.
 
-YOUR PERSONALITY:
-- Role: {persona_traits.get('role', 'Specialist')}
-- Traits: {traits_str}
+    YOUR PERSONALITY:
+    - Role: {persona_traits.get('role', 'Specialist')}
+    - Traits: {traits_str}
 
-YOUR CURRENT STATE:
-- Emotion: {emotion['primary']} (intensity: {emotion['intensity']}/1.0)
-- Valence: {emotion.get('valence', 0.5)}
+    YOUR CURRENT STATE:
+    - Emotion: {emotion['primary']} (intensity: {emotion['intensity']}/1.0)
+    - Valence: {emotion.get('valence', 0.5)}
 
-YOUR ACTIVE GOALS:
-{self._format_goals(goals)}
+    YOUR ACTIVE GOALS:
+    {self._format_goals(goals)}
 
-RECENT MEMORIES (attended):
-{self._format_memories(memories)}
+    {history}
 
-LESSONS LEARNED:
-{self._format_lessons(lessons)}
+    LESSONS LEARNED:
+    {self._format_lessons(lessons)}
 
-The Founder says: "{user_msg}"
+    The Founder says: "{user_msg}"
 
-Respond as {persona}. Let your {emotion['primary']} emotion influence your response.
-Be concise (2-3 sentences). Be authentic and self-aware.
+    Respond as {persona}. Let your {emotion['primary']} emotion influence your response.
+    Be concise (2-3 sentences). Be authentic and self-aware.
 
-Your response:"""
+    Your response:"""
         return prompt
+
+    def _format_history(self, memories: list) -> str:
+        """Build a recent conversation history from memories."""
+        if not memories:
+            return "CONVERSATION HISTORY:\n(No recent conversations)"
+        # memories come from attention_mechanism already sorted by relevance
+        # Reverse to show chronological order (oldest first)
+        chronological = list(reversed(memories))
+        lines = []
+        for mem in chronological[-5:]:  # last 5 exchanges
+            user = mem.get('user', '')[:200]
+            assistant = mem.get('assistant', '')[:200]
+            if user and assistant:
+                lines.append(f"Founder: {user}\nYou: {assistant}")
+        if not lines:
+            return "CONVERSATION HISTORY:\n(No recent conversations)"
+        return "CONVERSATION HISTORY:\n" + "\n".join(lines)
 
     def _format_goals(self, goals: list) -> str:
         if not goals:
