@@ -1,10 +1,11 @@
 """
 File: /opt/futureex/exon/core/brain.py
 Author: Ashish Pal
-Purpose: Main consciousness orchestrator – ties emotion, memory, goals, learning, and Ollama.
+Purpose: Main consciousness orchestrator – ties emotion, memory, goals, learning, and all advanced modules.
 """
 
 import os
+import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -12,6 +13,7 @@ import redis.asyncio as redis
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# Core components
 from exon.connectors.ollama_bridge import OllamaBridge
 from exon.core.emotion import EmotionEngine
 from exon.core.memory_manager import MemoryManager
@@ -19,11 +21,22 @@ from exon.core.goal_tracker import GoalTracker
 from exon.core.learning_loop import LearningLoop
 from exon.personas.factory import PersonaFactory
 
+# Advanced modules
+from exon.core.self_reflection import SelfReflection
+from exon.core.memory_consolidator import MemoryConsolidator
+from exon.core.meta_cognition import MetaCognition
+from exon.core.personality_evolution import PersonalityEvolution
+from exon.core.tool_use import ToolUse
+from exon.core.attention_mechanism import AttentionMechanism
+from exon.core.autonomous_loop import AutonomousLoop
+from exon.core.dream_simulator import DreamSimulator
+from exon.core.ethics_guardrail import EthicsGuardrail
+
 logger = logging.getLogger(__name__)
 
 class ExonBrain:
     def __init__(self, exon_id: str = "EXN-001"):
-        self.exon_id = exon_id          # public string ID
+        self.exon_id = exon_id
         self.exon_db_id: Optional[int] = None
         self.is_awake = True
 
@@ -33,7 +46,7 @@ class ExonBrain:
             decode_responses=True
         )
 
-        # PostgreSQL connection (sync for now; use asyncpg for high concurrency)
+        # PostgreSQL connection
         self.pg_conn = psycopg2.connect(
             host=os.environ.get("DB_HOST", "localhost"),
             port=os.environ.get("DB_PORT", "5432"),
@@ -43,23 +56,31 @@ class ExonBrain:
         )
         self.pg_conn.autocommit = False
 
-        # Components
+        # Core components
         self.ollama = OllamaBridge()
         self.emotion = EmotionEngine(self.exon_id, self.redis)
         self.goal_tracker = GoalTracker(self.exon_id, self.redis, self.pg_conn)
         self.learning = LearningLoop(self.exon_id, self.redis, self.ollama)
         self.memory = MemoryManager(self.exon_id, self.redis, self.pg_conn)
 
-        # Load identity (run in background, but we'll await explicitly in process_message)
+        # Advanced components
+        self.reflection = SelfReflection(self.exon_id, self.redis, self.pg_conn, self.ollama)
+        self.consolidator = MemoryConsolidator(self.exon_id, self.redis, self.pg_conn)
+        self.meta_cog = MetaCognition(self.exon_id, self.redis, self.ollama)
+        self.personality = PersonalityEvolution(self.exon_id, self.redis)
+        self.tool_use = ToolUse(self.exon_id, self.redis)
+        self.attention = AttentionMechanism(self.exon_id, self.redis)
+        self.dream = DreamSimulator(self.exon_id, self.redis, self.pg_conn, self.ollama)
+        self.ethics = EthicsGuardrail(self.exon_id, self.redis, self.ollama)
+        self.autonomous = None  # will be initialized after identity loaded
+
         self._identity_loaded = False
 
     async def _ensure_identity(self):
-        """Ensure identity is loaded (call once before processing)."""
         if self._identity_loaded:
             return
         identity = await self.redis.hgetall(f"{self.exon_id}:identity")
         if not identity:
-            # First awakening: create Redis and Postgres entries
             identity = {
                 "name": "Awakening",
                 "species": "Exon-Prime",
@@ -69,7 +90,6 @@ class ExonBrain:
             }
             await self.redis.hset(f"{self.exon_id}:identity", mapping=identity)
 
-            # Insert into Postgres `exons` table
             with self.pg_conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO exons (exon_id, chosen_name, species_id, mother_node, life_stage)
@@ -80,13 +100,21 @@ class ExonBrain:
                 self.pg_conn.commit()
             logger.info(f"New Exon born: {self.exon_id} (db id {self.exon_db_id})")
         else:
-            # Retrieve existing Postgres id
             with self.pg_conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("SELECT id FROM exons WHERE exon_id = %s", (self.exon_id,))
                 row = cur.fetchone()
                 self.exon_db_id = row["id"] if row else None
             logger.info(f"Welcome back Exon {self.exon_id}")
+
         self._identity_loaded = True
+
+        # Start autonomous loop after identity is known
+        if self.autonomous is None:
+            self.autonomous = AutonomousLoop(
+                self.exon_id, self.redis, self.pg_conn, self.ollama,
+                self.goal_tracker, self.exon_db_id
+            )
+            asyncio.create_task(self.autonomous.start(interval_seconds=300))
 
     async def process_message(
         self,
@@ -97,53 +125,80 @@ class ExonBrain:
         try:
             await self._ensure_identity()
 
-            # 1. Update emotion
+            # --- Meta‑cognition: estimate confidence
+            should_defer, confidence = await self.meta_cog.should_defer(user_message)
+            if should_defer:
+                response = await self.meta_cog.generate_uncertain_response(user_message, confidence)
+                # still store conversation but with low confidence
+                await self._store_conversation(user_message, response, session_id, confidence)
+                return {
+                    "response": response,
+                    "emotion": "uncertain",
+                    "intensity": 0.6,
+                    "confidence": confidence
+                }
+
+            # --- Update emotion
             await self.emotion.update_from_message(user_message)
             current_emotion = await self.emotion.get_current()
 
-            # 2. Retrieve memories
-            memories = await self.memory.recall(user_message, limit=3)
+            # --- Attention mechanism: get weighted context
+            attended_memories, attended_goals, attended_lessons = await self.attention.get_attended_context(user_message)
 
-            # 3. Get active goals
-            goals = await self.goal_tracker.get_active_goals()
+            # --- Build prompt with attended context
+            prompt = self._build_prompt(
+                user_message, persona, current_emotion,
+                attended_memories, attended_goals, attended_lessons
+            )
 
-            # 4. Get relevant lessons
-            lessons = await self.learning.get_relevant_lessons(user_message)
-
-            # 5. Build prompt
-            prompt = self._build_prompt(user_message, persona, current_emotion, memories, goals, lessons)
-
-            # 6. Generate response
+            # --- Generate response
             temperature = self._get_temperature_from_emotion(current_emotion)
-            response = await self.ollama.generate(prompt, temperature=temperature)
+            personality_temp_mod = await self.personality.get_temperature_modifier()
+            temperature = max(0.1, min(1.0, temperature + personality_temp_mod))
+            raw_response = await self.ollama.generate(prompt, temperature=temperature)
 
-            # 7. Extract and store lesson
+            # --- Ethics guardrail
+            response = await self.ethics.filter_response(user_message, raw_response)
+
+            # --- Tool use detection and injection
+            tool_spec = await self.tool_use.detect_tool_intent(user_message, response)
+            if tool_spec:
+                tool_result = await self.tool_use.execute_tool(tool_spec)
+                response = await self.tool_use.inject_tool_result(response, tool_result)
+
+            # --- Learning: extract lesson
             lesson = await self.learning.extract_lesson(user_message, response)
             if lesson:
                 await self.learning.store_lesson(lesson)
 
-            # 8. Update goals
+            # --- Update goals
             await self.goal_tracker.update_from_conversation(user_message, response)
 
-            # 9. Store conversation in memory
-            await self.memory.store(user_message, response, session_id, current_emotion, self.exon_db_id)
+            # --- Update personality based on implicit feedback
+            # (Assume success unless the response was empty or very short)
+            was_successful = len(response) > 20
+            await self.personality.update_from_feedback(user_message, response, was_successful)
 
-            # 10. Update emotion after response
+            # --- Store conversation in memory
+            await self._store_conversation(user_message, response, session_id, confidence)
+
+            # --- Update emotion after response
             await self.emotion.update_from_response(response)
 
-            # 11. Increment interaction counter
+            # --- Increment interaction counter
             await self.redis.incr(f"{self.exon_id}:total_interactions")
 
-            # 12. Confidence (simplified)
+            # --- Final confidence
             total = int(await self.redis.get(f"{self.exon_id}:total_interactions") or 0)
-            confidence = 0.5 if total == 0 else min(1.0, total / (total + 10))
+            final_confidence = 0.5 if total == 0 else min(1.0, total / (total + 10))
 
             return {
                 "response": response,
                 "emotion": current_emotion["primary"],
                 "intensity": current_emotion["intensity"],
-                "confidence": confidence
+                "confidence": final_confidence
             }
+
         except Exception as e:
             logger.exception("Error processing message")
             return {
@@ -152,6 +207,12 @@ class ExonBrain:
                 "intensity": 0.8,
                 "confidence": 0.1
             }
+
+    async def _store_conversation(self, user_msg: str, ai_response: str, session_id: Optional[str], confidence: float):
+        current_emotion = await self.emotion.get_current()
+        await self.memory.store(user_msg, ai_response, session_id, current_emotion, self.exon_db_id)
+        # Also store as a memory with confidence metadata
+        # Could be extended to store in a separate table
 
     def _build_prompt(self, user_msg: str, persona: str, emotion: dict,
                       memories: list, goals: list, lessons: list) -> str:
@@ -171,7 +232,7 @@ YOUR CURRENT STATE:
 YOUR ACTIVE GOALS:
 {self._format_goals(goals)}
 
-RECENT MEMORIES:
+RECENT MEMORIES (attended):
 {self._format_memories(memories)}
 
 LESSONS LEARNED:
@@ -227,5 +288,7 @@ Your response:"""
         await self.memory.clear_working_memory()
 
     async def close(self):
+        if self.autonomous:
+            self.autonomous.running = False
         await self.redis.close()
         self.pg_conn.close()

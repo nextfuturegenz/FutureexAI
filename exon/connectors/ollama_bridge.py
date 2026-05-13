@@ -1,7 +1,7 @@
 """
 File: /opt/futureex/exon/connectors/ollama_bridge.py
 Author: Ashish Pal
-Purpose: Async bridge to Ollama API (phi3:mini). Handles retries, timeouts, and no mock fallback.
+Purpose: Async bridge to Ollama API – works inside Docker containers.
 """
 
 import aiohttp
@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 class OllamaBridge:
     def __init__(self):
+        # Allow override; inside Docker, set to http://host.docker.internal:11434
         self.ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         self.model = os.environ.get("OLLAMA_MODEL", "phi3:mini")
-        self.timeout = aiohttp.ClientTimeout(total=30)
+        self.timeout = aiohttp.ClientTimeout(total=60)  # increased for slower models
         self.max_retries = 3
         self.retry_delay = 1.0
 
     async def generate(self, prompt: str, temperature: float = 0.7) -> str:
-        """Generate response with retries. Raises exception on failure."""
         for attempt in range(self.max_retries):
             try:
                 async with aiohttp.ClientSession(timeout=self.timeout) as session:
@@ -44,8 +44,8 @@ class OllamaBridge:
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(self.retry_delay * (2 ** attempt))
                 else:
-                    raise Exception(f"Ollama unreachable after {self.max_retries} tries") from e
-        return ""  # never reached
+                    raise Exception(f"Ollama unreachable at {self.ollama_host} after {self.max_retries} tries") from e
+        return ""
 
     async def health_check(self) -> bool:
         try:
