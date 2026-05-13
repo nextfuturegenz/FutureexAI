@@ -738,6 +738,7 @@ File: /opt/futureex/exon/api/app.py
 Author: Ashish Pal
 Purpose: FastAPI server for Exon Consciousness System.
 Refactored: Split routes into separate modules, UI into static files.
+            Added auto-ingestion of knowledge files on startup.
 """
 
 import logging
@@ -792,6 +793,22 @@ async def startup_event():
     await exon_brain._ensure_identity()
     if exon_brain.background._task is None:
         await exon_brain.background.start()
+    
+    # Auto-ingest knowledge files on startup
+    knowledge_dir = os.environ.get(
+        "KNOWLEDGE_DIR",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "knowledge")
+    )
+    if os.path.exists(knowledge_dir):
+        logger.info(f"📚 Ingesting knowledge from {knowledge_dir}...")
+        try:
+            from exon.scripts.ingest_knowledge import ingest_knowledge
+            await ingest_knowledge(knowledge_dir, clear_first=False, exon_id=exon_brain.exon_id)
+            logger.info("✅ Knowledge ingestion complete")
+        except Exception as e:
+            logger.warning(f"⚠️  Knowledge ingestion skipped: {e}")
+    else:
+        logger.info(f"ℹ️  No knowledge directory at {knowledge_dir}, skipping ingestion")
 
 @app.on_event("shutdown")
 async def shutdown_event():
