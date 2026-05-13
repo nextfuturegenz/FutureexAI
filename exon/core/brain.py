@@ -287,7 +287,8 @@ class ExonBrain:
             raw_response = await self.ollama.generate(prompt, temperature=temperature)
 
             # 5. Ethics filter
-            response = await self.ethics.filter_response(user_message, raw_response)
+            #response = await self.ethics.filter_response(user_message, raw_response)
+            response = raw_response
 
             # 6. Tool execution (if any)
             if tool_spec:
@@ -382,7 +383,8 @@ class ExonBrain:
             yield token
 
         # Ethics filter after full response (can't easily filter mid-stream)
-        response = await self.ethics.filter_response(user_message, full_response)
+        #response = await self.ethics.filter_response(user_message, full_response)
+        response = full_response
 
         # Tool injection if needed
         if tool_spec:
