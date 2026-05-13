@@ -3,9 +3,9 @@ File: /opt/futureex/exon/scripts/ingest_knowledge.py
 Author: Ashish Pal
 Purpose: Ingest Markdown knowledge files into Exon's vector database.
 Usage: 
-    python -m exon.scripts.ingest_knowledge
-    python -m exon.scripts.ingest_knowledge --dir /path/to/markdown/files
-    python -m exon.scripts.ingest_knowledge --clear  # Clear existing knowledge first
+    python3 -m exon.scripts.ingest_knowledge
+    python3 -m exon.scripts.ingest_knowledge --dir /path/to/markdown/files
+    python3 -m exon.scripts.ingest_knowledge --clear  # Clear existing knowledge first
 """
 
 import sys
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # Configuration
 # ============================================================================
-EXON_ID = os.environ.get("EXON_ID", "EXN-001")
+DEFAULT_EXON_ID = os.environ.get("EXON_ID", "EXN-001")
 DB_HOST = os.environ.get("DB_HOST", "localhost")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_NAME = os.environ.get("DB_NAME", "futureex")
@@ -195,11 +195,15 @@ def store_embeddings(conn, exon_id: str, chunks: List[Dict]):
 # ============================================================================
 # Main Ingestion Pipeline
 # ============================================================================
-async def ingest_knowledge(directory: str, clear_first: bool = False):
+async def ingest_knowledge(directory: str, clear_first: bool = False, exon_id: str = None):
     """Main ingestion pipeline."""
+    if exon_id is None:
+        exon_id = DEFAULT_EXON_ID
+    
     logger.info("=" * 60)
     logger.info("EXON KNOWLEDGE INGESTION")
     logger.info("=" * 60)
+    logger.info(f"Exon ID: {exon_id}")
     
     # 1. Read markdown files
     logger.info("\n📁 Reading markdown files...")
@@ -251,9 +255,9 @@ async def ingest_knowledge(directory: str, clear_first: bool = False):
         ensure_table_exists(conn)
         
         if clear_first:
-            clear_knowledge(conn, EXON_ID)
+            clear_knowledge(conn, exon_id)
         
-        store_embeddings(conn, EXON_ID, all_chunks)
+        store_embeddings(conn, exon_id, all_chunks)
         
         logger.info(f"\n✅ Successfully ingested {len(all_chunks)} knowledge chunks!")
         
@@ -261,16 +265,16 @@ async def ingest_knowledge(directory: str, clear_first: bool = False):
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*), SUM(char_length(chunk_text)) FROM exon_knowledge WHERE exon_id = %s",
-                (EXON_ID,)
+                (exon_id,)
             )
             count, total_chars = cur.fetchone()
             logger.info(f"\n📊 Knowledge Base Stats:")
             logger.info(f"   Total chunks: {count}")
-            logger.info(f"   Total characters: {total_chars}")
+            logger.info(f"   Total characters: {total_chars or 0}")
             
             cur.execute(
                 "SELECT source_file, COUNT(*) as cnt FROM exon_knowledge WHERE exon_id = %s GROUP BY source_file ORDER BY cnt DESC",
-                (EXON_ID,)
+                (exon_id,)
             )
             logger.info(f"\n   Files indexed:")
             for row in cur.fetchall():
@@ -301,15 +305,11 @@ def main():
     )
     parser.add_argument(
         "--exon-id",
-        default=EXON_ID,
-        help=f"Exon ID (default: {EXON_ID})"
+        default=DEFAULT_EXON_ID,
+        help=f"Exon ID (default: {DEFAULT_EXON_ID})"
     )
     
     args = parser.parse_args()
-    
-    # Override EXON_ID if specified
-    global EXON_ID
-    EXON_ID = args.exon_id
     
     # Resolve directory path
     directory = args.dir
@@ -320,7 +320,7 @@ def main():
     
     logger.info(f"Knowledge directory: {directory}")
     
-    asyncio.run(ingest_knowledge(directory, args.clear))
+    asyncio.run(ingest_knowledge(directory, args.clear, exon_id=args.exon_id))
 
 
 if __name__ == "__main__":
