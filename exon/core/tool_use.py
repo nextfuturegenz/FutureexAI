@@ -1,28 +1,27 @@
 """
 File: /opt/futureex/exon/core/tool_use.py
 Author: Ashish Pal
-Purpose: Tools: calculator, web search (main DuckDuckGo HTML + suggestions), time, Wikipedia.
+Purpose: Tools: calculator, web search (Brave Search API), time, Wikipedia.
+Refactored: Fixed calculator detection, switched to Brave Search.
 """
 
 import asyncio
 import logging
 import re
 import random
+import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import redis.asyncio as redis
 import aiohttp
-from bs4 import BeautifulSoup
 from simpleeval import simple_eval
 import wikipedia
 
 logger = logging.getLogger(__name__)
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
-]
+# Brave Search API free tier (2,000 queries/month)
+BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
+BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 
 class ToolUse:
     def __init__(self, exon_id: str, redis_client: redis.Redis):
@@ -32,53 +31,67 @@ class ToolUse:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            headers = {"User-Agent": random.choice(USER_AGENTS)}
+            headers = {"Accept": "application/json"}
+            if BRAVE_API_KEY:
+                headers["X-Subscription-Token"] = BRAVE_API_KEY
             self._session = aiohttp.ClientSession(headers=headers)
         return self._session
 
     async def detect_tool_intent(self, user_message: str, response: str = "") -> Optional[Dict]:
         msg = user_message.lower()
-        # Calculator
-        if re.search(r'(calculate|math|what is|compute|solve)', msg) or re.search(r'[\d\+\-\*\/\(\)]{3,}', msg):
-            expr = self._extract_expression(msg)
+
+        # Calculator: only trigger if there is a digit AND an operator, or explicit "calculate"
+        calc_words = ["calculate", "compute", "solve", "math"]
+        if any(w in msg for w in calc_words) or re.search(r'[\d]+\s*[\+\-\*\/]\s*[\d]+', msg):
+            expr = self._extract_expression(user_message)
             if expr:
                 return {"tool": "calculator", "expression": expr}
-        # Web search – extract clean query
+
+        # Web search
         search_match = re.search(r'(?:search|google|find|look up|tell me about)\s+(?:for\s+)?(.+)', msg, re.IGNORECASE)
         if search_match:
             query = search_match.group(1).strip()
             query = re.sub(r'[.?!]+$', '', query)
             if query:
                 return {"tool": "web_search", "query": query}
-        # Also if user asks a plain factual question
+        # Factual question pattern (but not captured by local knowledge)
         if re.match(r'^(what|who|where|when|how)\s+', msg) and len(msg.split()) > 3:
             return {"tool": "web_search", "query": user_message}
+
         # Current time
         if re.search(r'(time|current time|what time|date|today|what day)', msg):
             return {"tool": "current_time"}
+
         # Wikipedia
         if re.search(r'(wikipedia|who is|what is a|define|tell me about)', msg):
             topic = self._extract_wikipedia_topic(user_message)
             if topic:
                 return {"tool": "wikipedia", "topic": topic}
+
         return None
 
-    def _extract_expression(self, text: str) -> str:
+    def _extract_expression(self, text: str) -> Optional[str]:
+        """Extract a mathematical expression from text."""
+        # Look for patterns like "calculate 15 * 3", "what is 2+2", or any arithmetic with digits
         patterns = [
-            r'calculate\s+([\d\s\+\-\*\/\(\)]+)',
-            r'what is\s+([\d\s\+\-\*\/\(\)]+)',
-            r'math\s+([\d\s\+\-\*\/\(\)]+)',
-            r'solve\s+([\d\s\+\-\*\/\(\)]+)',
-            r'([\d\+\-\*\/\(\)]+)'
+            r'calculate\s+([\d\s\+\-\*\/\(\)\.]+)',
+            r'what is\s+([\d\s\+\-\*\/\(\)\.]+)',
+            r'math\s+([\d\s\+\-\*\/\(\)\.]+)',
+            r'solve\s+([\d\s\+\-\*\/\(\)\.]+)',
+            r'compute\s+([\d\s\+\-\*\/\(\)\.]+)',
+            # general arithmetic: digits with at least one operator
+            r'([\d\.]+\s*[\+\-\*\/]\s*[\d\.]+(?:\s*[\+\-\*\/]\s*[\d\.]+)*)',
         ]
         for pat in patterns:
             match = re.search(pat, text, re.IGNORECASE)
             if match:
                 expr = match.group(1).strip()
-                expr = re.sub(r'[^0-9+\-*/()\s]', '', expr)
-                if expr:
+                # Remove any non-math characters except digits, operators, spaces, parens, decimal
+                expr = re.sub(r'[^0-9+\-*/()\s.]', '', expr)
+                # Ensure it contains at least one digit and one operator
+                if re.search(r'\d', expr) and re.search(r'[\+\-\*/]', expr):
                     return expr
-        return ""
+        return None
 
     def _extract_wikipedia_topic(self, message: str) -> Optional[str]:
         msg = message.lower()
@@ -109,13 +122,7 @@ class ToolUse:
                 query = tool_spec.get("query", "")
                 if not query:
                     return "No search query provided."
-                result = await self._web_search(query)
-                if "No results found" in result:
-                    # Also get suggestions
-                    suggestions = await self._get_search_suggestions(query)
-                    if suggestions:
-                        result += f"\n\nTry these alternative searches:\n• " + "\n• ".join(suggestions[:3])
-                return result
+                return await self._web_search_brave(query)
             elif tool == "current_time":
                 return await self._get_current_time()
             elif tool == "wikipedia":
@@ -138,59 +145,33 @@ class ToolUse:
         except Exception as e:
             return f"Could not calculate '{expression}': {str(e)}"
 
-    async def _web_search(self, query: str, max_results: int = 3) -> str:
-        """Search DuckDuckGo main HTML (more robust)."""
-        for attempt in range(2):
-            try:
-                url = "https://html.duckduckgo.com/html/"
-                params = {"q": query}
-                session = await self._get_session()
-                async with session.get(url, params=params, timeout=15) as resp:
-                    if resp.status == 200:
-                        html = await resp.text()
-                        soup = BeautifulSoup(html, 'html.parser')
-                        results = []
-                        # Main results are in <a class="result__a">
-                        for result_link in soup.select('a.result__a'):
-                            title = result_link.get_text(strip=True)
-                            # Find parent .result__snippet
-                            snippet_tag = result_link.find_parent('div', class_='result')
-                            if snippet_tag:
-                                snippet_div = snippet_tag.find('a', class_='result__snippet')
-                            else:
-                                snippet_div = None
-                            snippet = snippet_div.get_text(strip=True) if snippet_div else ""
-                            results.append({"title": title, "snippet": snippet})
-                            if len(results) >= max_results:
-                                break
-                        if results:
-                            formatted = [f"• {r['title']}\n  {r['snippet'][:300]}" for r in results]
-                            return f"Search results for '{query}':\n\n" + "\n\n".join(formatted)
-                        else:
-                            await asyncio.sleep(1)
-                            continue
-                    else:
-                        logger.warning(f"HTTP {resp.status} for {query}")
-                        await asyncio.sleep(1)
-            except Exception as e:
-                logger.warning(f"Search attempt {attempt+1} failed: {e}")
-                await asyncio.sleep(1)
-        return f"No results found for '{query}'."
+    async def _web_search_brave(self, query: str, max_results: int = 3) -> str:
+        """Brave Search API (free tier)."""
+        if not BRAVE_API_KEY:
+            logger.warning("No BRAVE_API_KEY set; falling back to dummy response")
+            return f"(Brave Search not configured. Please set BRAVE_API_KEY.)"
 
-    async def _get_search_suggestions(self, query: str) -> List[str]:
-        """Get related search suggestions from DuckDuckGo's suggestions API."""
+        session = await self._get_session()
+        params = {"q": query, "count": max_results}
         try:
-            url = f"https://duckduckgo.com/ac/?q={query}&type=list"
-            session = await self._get_session()
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    # Format: [{"phrase": "suggestion1"}, ...]
-                    suggestions = [item['phrase'] for item in data if 'phrase' in item]
-                    return suggestions[:5]
+            async with session.get(BRAVE_SEARCH_URL, params=params, timeout=15) as resp:
+                if resp.status != 200:
+                    logger.error(f"Brave Search error {resp.status}: {await resp.text()}")
+                    return f"Search failed (status {resp.status})."
+                data = await resp.json()
+                web_results = data.get("web", {}).get("results", [])
+                if not web_results:
+                    return f"No results found for '{query}'."
+                formatted = []
+                for r in web_results[:max_results]:
+                    title = r.get("title", "")
+                    description = r.get("description", "")
+                    url = r.get("url", "")
+                    formatted.append(f"• {title}\n  {description[:300]}\n  {url}")
+                return f"Search results for '{query}':\n\n" + "\n\n".join(formatted)
         except Exception as e:
-            logger.debug(f"Suggestions failed: {e}")
-        return []
+            logger.error(f"Brave search exception: {e}")
+            return f"Search error: {str(e)}"
 
     async def _get_current_time(self) -> str:
         now = datetime.now()
@@ -214,14 +195,11 @@ class ToolUse:
         return wikipedia.summary(topic, sentences=sentences)
 
     async def inject_tool_result(self, original_response: str, tool_result: str) -> str:
-        """Cleaner injection – only if tool result is meaningful and different from original."""
         if not tool_result or tool_result.startswith("Tool error"):
-            # Do not inject error messages that break conversation
             return original_response
         # Avoid duplication
         if "[System tool result:" in original_response:
             return original_response
-        # Append on a new line
         return f"{original_response}\n\n{tool_result}"
 
     async def close(self):

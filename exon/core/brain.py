@@ -2,12 +2,13 @@
 File: /opt/futureex/exon/core/brain.py
 Author: Ashish Pal
 Purpose: Main consciousness orchestrator – ties emotion, memory, goals, learning, and all advanced modules.
+Refactored: Added local knowledge base, parallel meta-cognition, background task queue, streaming support.
 """
 
 import os
 import asyncio
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, AsyncGenerator
 from datetime import datetime
 import redis.asyncio as redis
 import psycopg2
@@ -34,6 +35,111 @@ from exon.core.ethics_guardrail import EthicsGuardrail
 
 logger = logging.getLogger(__name__)
 
+# -----------------------------------------------------------------------------
+# Simple in‑memory knowledge base for instant factual answers
+# -----------------------------------------------------------------------------
+LOCAL_KNOWLEDGE = {
+    # General facts
+    "capital of india": "New Delhi",
+    "capital of france": "Paris",
+    "capital of germany": "Berlin",
+    "capital of japan": "Tokyo",
+    "capital of china": "Beijing",
+    "capital of australia": "Canberra",
+    "capital of brazil": "Brasília",
+    "capital of canada": "Ottawa",
+    "capital of united states": "Washington, D.C.",
+    "capital of usa": "Washington, D.C.",
+    "capital of russia": "Moscow",
+    "capital of italy": "Rome",
+    "capital of spain": "Madrid",
+    "capital of south korea": "Seoul",
+    "who is the president of india": "Droupadi Murmu (as of 2025)",
+    "who is the prime minister of india": "Narendra Modi",
+    "what is the population of earth": "Approximately 8 billion (2025 estimate)",
+    "what is the speed of light": "299,792,458 metres per second",
+    "what is the boiling point of water": "100°C (212°F) at sea level",
+    "what is pi": "3.14159… (the ratio of a circle's circumference to its diameter)",
+    "who wrote hamlet": "William Shakespeare",
+    "what is the chemical symbol for gold": "Au",
+    "what is the tallest mountain": "Mount Everest (8,848.86 m)",
+    "what is the largest ocean": "Pacific Ocean",
+}
+# Normalize keys to lowercase for matching
+LOCAL_KNOWLEDGE_NORM = {k.lower(): v for k, v in LOCAL_KNOWLEDGE.items()}
+
+def _local_knowledge_answer(user_message: str) -> Optional[str]:
+    """Return a pre‑cached answer if the user's question matches exactly."""
+    norm = user_message.strip().lower().rstrip('?').strip()
+    # Direct lookup
+    if norm in LOCAL_KNOWLEDGE_NORM:
+        return LOCAL_KNOWLEDGE_NORM[norm]
+    # Try with 'what is' or 'who is' removed
+    for prefix in ["what is ", "who is ", "where is ", "tell me ", "what's ", "who's "]:
+        if norm.startswith(prefix):
+            key = norm[len(prefix):].strip()
+            if key in LOCAL_KNOWLEDGE_NORM:
+                return LOCAL_KNOWLEDGE_NORM[key]
+    return None
+
+# -----------------------------------------------------------------------------
+# Background task queue (simple asyncio.Queue)
+# -----------------------------------------------------------------------------
+class BackgroundTaskQueue:
+    """Holds a queue of jobs and processes them in the background."""
+    def __init__(self, brain: 'ExonBrain'):
+        self.brain = brain
+        self.queue = asyncio.Queue()
+        self._task: Optional[asyncio.Task] = None
+
+    async def start(self):
+        self._task = asyncio.create_task(self._worker())
+
+    async def stop(self):
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+
+    async def add_job(self, job_type: str, **kwargs):
+        await self.queue.put((job_type, kwargs))
+
+    async def _worker(self):
+        while True:
+            job_type, kwargs = await self.queue.get()
+            try:
+                if job_type == "extract_lesson":
+                    lesson = await self.brain.learning.extract_lesson(kwargs["user_message"], kwargs["response"])
+                    if lesson:
+                        await self.brain.learning.store_lesson(lesson)
+                elif job_type == "update_goals":
+                    await self.brain.goal_tracker.update_from_conversation(kwargs["user_message"], kwargs["response"])
+                elif job_type == "update_personality":
+                    was_successful = kwargs.get("was_successful", True)
+                    await self.brain.personality.update_from_feedback(kwargs["user_message"], kwargs["response"], was_successful)
+                elif job_type == "update_emotion":
+                    await self.brain.emotion.update_from_response(kwargs["response"])
+                elif job_type == "increment_interactions":
+                    await self.brain.redis.incr(f"{self.brain.exon_id}:total_interactions")
+                elif job_type == "memory_consolidation":
+                    if self.brain.exon_db_id:
+                        await self.brain.consolidator.consolidate(self.brain.exon_db_id)
+                elif job_type == "reflection":
+                    if self.brain.exon_db_id and await self.brain.reflection.should_reflect():
+                        await self.brain.reflection.run_reflection(self.brain.exon_db_id)
+                elif job_type == "dream":
+                    if self.brain.exon_db_id:
+                        await self.brain.dream.run_dream_cycle(self.brain.exon_db_id)
+            except Exception as e:
+                logger.error(f"Background job {job_type} failed: {e}")
+            finally:
+                self.queue.task_done()
+
+# -----------------------------------------------------------------------------
+# ExonBrain (refactored)
+# -----------------------------------------------------------------------------
 class ExonBrain:
     def __init__(self, exon_id: str = "EXN-001"):
         self.exon_id = exon_id
@@ -75,6 +181,7 @@ class ExonBrain:
         self.autonomous = None  # will be initialized after identity loaded
 
         self._identity_loaded = False
+        self.background = BackgroundTaskQueue(self)
 
     async def _ensure_identity(self):
         if self._identity_loaded:
@@ -108,6 +215,10 @@ class ExonBrain:
 
         self._identity_loaded = True
 
+        # Start background task queue
+        if not self.background._task:
+            await self.background.start()
+
         # Start autonomous loop after identity is known
         if self.autonomous is None:
             self.autonomous = AutonomousLoop(
@@ -125,12 +236,37 @@ class ExonBrain:
         try:
             await self._ensure_identity()
 
-            # --- Meta‑cognition: estimate confidence
-            should_defer, confidence = await self.meta_cog.should_defer(user_message)
+            # 1. Check local knowledge base for instant answer
+            local_answer = _local_knowledge_answer(user_message)
+            if local_answer:
+                # Store the conversation and do minimal post-processing
+                await self._store_conversation(user_message, local_answer, session_id, 0.9)
+                await self.background.add_job("increment_interactions")
+                return {
+                    "response": local_answer,
+                    "emotion": "satisfied",
+                    "intensity": 0.8,
+                    "confidence": 0.95
+                }
+
+            # 2. Run pre-LLM tasks in parallel: emotion, attention, meta-cognition
+            emotion_task = asyncio.create_task(self.emotion.update_from_message(user_message))
+            attention_task = asyncio.create_task(self.attention.get_attended_context(user_message))
+            meta_task = asyncio.create_task(self.meta_cog.should_defer(user_message))
+            tool_detect_task = asyncio.create_task(self.tool_use.detect_tool_intent(user_message))
+
+            # Wait for all to finish
+            await emotion_task
+            attended_memories, attended_goals, attended_lessons = await attention_task
+            should_defer, confidence = await meta_task
+            tool_spec = await tool_detect_task
+
+            current_emotion = await self.emotion.get_current()
+
             if should_defer:
                 response = await self.meta_cog.generate_uncertain_response(user_message, confidence)
-                # still store conversation but with low confidence
                 await self._store_conversation(user_message, response, session_id, confidence)
+                await self.background.add_job("increment_interactions")
                 return {
                     "response": response,
                     "emotion": "uncertain",
@@ -138,57 +274,38 @@ class ExonBrain:
                     "confidence": confidence
                 }
 
-            # --- Update emotion
-            await self.emotion.update_from_message(user_message)
-            current_emotion = await self.emotion.get_current()
-
-            # --- Attention mechanism: get weighted context
-            attended_memories, attended_goals, attended_lessons = await self.attention.get_attended_context(user_message)
-
-            # --- Build prompt with attended context
+            # 3. Build prompt
             prompt = self._build_prompt(
                 user_message, persona, current_emotion,
                 attended_memories, attended_goals, attended_lessons
             )
 
-            # --- Generate response
+            # 4. Generate response
             temperature = self._get_temperature_from_emotion(current_emotion)
             personality_temp_mod = await self.personality.get_temperature_modifier()
             temperature = max(0.1, min(1.0, temperature + personality_temp_mod))
             raw_response = await self.ollama.generate(prompt, temperature=temperature)
 
-            # --- Ethics guardrail
+            # 5. Ethics filter
             response = await self.ethics.filter_response(user_message, raw_response)
 
-            # --- Tool use detection and injection
-            tool_spec = await self.tool_use.detect_tool_intent(user_message, response)
+            # 6. Tool execution (if any)
             if tool_spec:
                 tool_result = await self.tool_use.execute_tool(tool_spec)
                 response = await self.tool_use.inject_tool_result(response, tool_result)
 
-            # --- Learning: extract lesson
-            lesson = await self.learning.extract_lesson(user_message, response)
-            if lesson:
-                await self.learning.store_lesson(lesson)
+            # 7. Queue background tasks (non-blocking)
+            await self.background.add_job("extract_lesson", user_message=user_message, response=response)
+            await self.background.add_job("update_goals", user_message=user_message, response=response)
+            await self.background.add_job("update_personality", user_message=user_message, response=response,
+                                          was_successful=len(response) > 20)
+            await self.background.add_job("update_emotion", response=response)
+            await self.background.add_job("increment_interactions")
 
-            # --- Update goals
-            await self.goal_tracker.update_from_conversation(user_message, response)
-
-            # --- Update personality based on implicit feedback
-            # (Assume success unless the response was empty or very short)
-            was_successful = len(response) > 20
-            await self.personality.update_from_feedback(user_message, response, was_successful)
-
-            # --- Store conversation in memory
+            # 8. Store conversation immediately
             await self._store_conversation(user_message, response, session_id, confidence)
 
-            # --- Update emotion after response
-            await self.emotion.update_from_response(response)
-
-            # --- Increment interaction counter
-            await self.redis.incr(f"{self.exon_id}:total_interactions")
-
-            # --- Final confidence
+            # 9. Final confidence
             total = int(await self.redis.get(f"{self.exon_id}:total_interactions") or 0)
             final_confidence = 0.5 if total == 0 else min(1.0, total / (total + 10))
 
@@ -208,11 +325,86 @@ class ExonBrain:
                 "confidence": 0.1
             }
 
+    async def process_message_stream(
+        self,
+        user_message: str,
+        persona: str = "Maya",
+        session_id: Optional[str] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Streaming version: yields tokens as soon as they are generated.
+        Also handles local knowledge and tool responses as streams.
+        """
+        await self._ensure_identity()
+
+        # Local knowledge instant answer?
+        local_answer = _local_knowledge_answer(user_message)
+        if local_answer:
+            # Yield the whole answer as a stream (single chunk)
+            yield local_answer
+            await self._store_conversation(user_message, local_answer, session_id, 0.9)
+            await self.background.add_job("increment_interactions")
+            return
+
+        # Pre-processing (same parallel tasks)
+        emotion_task = asyncio.create_task(self.emotion.update_from_message(user_message))
+        attention_task = asyncio.create_task(self.attention.get_attended_context(user_message))
+        meta_task = asyncio.create_task(self.meta_cog.should_defer(user_message))
+        tool_detect_task = asyncio.create_task(self.tool_use.detect_tool_intent(user_message))
+
+        await emotion_task
+        attended_memories, attended_goals, attended_lessons = await attention_task
+        should_defer, confidence = await meta_task
+        tool_spec = await tool_detect_task
+
+        current_emotion = await self.emotion.get_current()
+
+        if should_defer:
+            response = await self.meta_cog.generate_uncertain_response(user_message, confidence)
+            yield response
+            await self._store_conversation(user_message, response, session_id, confidence)
+            await self.background.add_job("increment_interactions")
+            return
+
+        prompt = self._build_prompt(
+            user_message, persona, current_emotion,
+            attended_memories, attended_goals, attended_lessons
+        )
+
+        temperature = self._get_temperature_from_emotion(current_emotion)
+        personality_temp_mod = await self.personality.get_temperature_modifier()
+        temperature = max(0.1, min(1.0, temperature + personality_temp_mod))
+
+        # Stream from Ollama
+        full_response = ""
+        async for token in self.ollama.generate_stream(prompt, temperature=temperature):
+            full_response += token
+            yield token
+
+        # Ethics filter after full response (can't easily filter mid-stream)
+        response = await self.ethics.filter_response(user_message, full_response)
+
+        # Tool injection if needed
+        if tool_spec:
+            tool_result = await self.tool_use.execute_tool(tool_spec)
+            # Append tool result as another chunk
+            tool_text = "\n\n" + tool_result
+            yield tool_text
+            response += tool_text
+
+        # Background tasks
+        await self.background.add_job("extract_lesson", user_message=user_message, response=response)
+        await self.background.add_job("update_goals", user_message=user_message, response=response)
+        await self.background.add_job("update_personality", user_message=user_message, response=response,
+                                      was_successful=len(response) > 20)
+        await self.background.add_job("update_emotion", response=response)
+        await self.background.add_job("increment_interactions")
+
+        await self._store_conversation(user_message, response, session_id, confidence)
+
     async def _store_conversation(self, user_msg: str, ai_response: str, session_id: Optional[str], confidence: float):
         current_emotion = await self.emotion.get_current()
         await self.memory.store(user_msg, ai_response, session_id, current_emotion, self.exon_db_id)
-        # Also store as a memory with confidence metadata
-        # Could be extended to store in a separate table
 
     def _build_prompt(self, user_msg: str, persona: str, emotion: dict,
                       memories: list, goals: list, lessons: list) -> str:
@@ -290,5 +482,6 @@ Your response:"""
     async def close(self):
         if self.autonomous:
             self.autonomous.running = False
+        await self.background.stop()
         await self.redis.close()
         self.pg_conn.close()
