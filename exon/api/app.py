@@ -135,6 +135,13 @@ async def get_goals():
     goals = await exon_brain.goal_tracker.get_active_goals()
     return {"goals": goals}
 
+@app.get("/thoughts")
+async def get_thoughts(limit: int = 10):
+    """Retrieve autonomous thoughts from Redis."""
+    thoughts_key = f"{exon_brain.exon_id}:proactive_thoughts"
+    thoughts = await exon_brain.redis.lrange(thoughts_key, 0, limit - 1)
+    return {"thoughts": thoughts}
+
 @app.post("/reset")
 async def reset_consciousness():
     await exon_brain.reset_working_memory()
@@ -160,6 +167,364 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 # ------------------------------------------------------------------
 # Web UI - Chat Interface
 # ------------------------------------------------------------------
+# @app.get("/ui", response_class=HTMLResponse)
+# async def chat_ui():
+#     html_content = """<!DOCTYPE html>
+# <html lang="en">
+# <head>
+#     <meta charset="UTF-8">
+#     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+#     <title>Exon Consciousness Interface</title>
+#     <style>
+#         * {
+#             margin: 0;
+#             padding: 0;
+#             box-sizing: border-box;
+#         }
+#         body {
+#             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+#             background: linear-gradient(135deg, #0a0f1e 0%, #0a1a2a 100%);
+#             color: #e0e0e0;
+#             height: 100vh;
+#             display: flex;
+#             overflow: hidden;
+#         }
+#         .sidebar {
+#             width: 280px;
+#             background: rgba(20, 30, 45, 0.9);
+#             backdrop-filter: blur(10px);
+#             border-right: 1px solid #2a3a55;
+#             display: flex;
+#             flex-direction: column;
+#             padding: 20px;
+#             overflow-y: auto;
+#         }
+#         .sidebar h2 {
+#             font-size: 1.3rem;
+#             margin-bottom: 20px;
+#             color: #7aa2f7;
+#             border-left: 3px solid #7aa2f7;
+#             padding-left: 12px;
+#         }
+#         .status-card {
+#             background: #0f1825;
+#             border-radius: 12px;
+#             padding: 15px;
+#             margin-bottom: 20px;
+#             border: 1px solid #2a3a55;
+#         }
+#         .status-card h3 {
+#             font-size: 0.9rem;
+#             text-transform: uppercase;
+#             letter-spacing: 1px;
+#             color: #aaa;
+#             margin-bottom: 10px;
+#         }
+#         .emotion {
+#             font-size: 2rem;
+#             font-weight: bold;
+#             color: #ffb347;
+#         }
+#         .intensity {
+#             font-size: 1.2rem;
+#             margin-top: 5px;
+#         }
+#         .confidence {
+#             font-size: 1rem;
+#             margin-top: 5px;
+#         }
+#         .memory-count {
+#             font-size: 1.5rem;
+#             font-weight: bold;
+#             color: #7dcfff;
+#         }
+#         .goals-list {
+#             list-style: none;
+#             margin-top: 8px;
+#         }
+#         .goals-list li {
+#             padding: 5px 0;
+#             font-size: 0.85rem;
+#             border-bottom: 1px solid #2a3a55;
+#         }
+#         .progress-bar {
+#             background: #2a3a55;
+#             border-radius: 8px;
+#             height: 6px;
+#             margin-top: 4px;
+#             overflow: hidden;
+#         }
+#         .progress-fill {
+#             background: #7aa2f7;
+#             width: 0%;
+#             height: 100%;
+#             border-radius: 8px;
+#         }
+#         .persona-selector {
+#             margin-top: auto;
+#             margin-bottom: 20px;
+#         }
+#         .persona-selector select {
+#             width: 100%;
+#             padding: 8px;
+#             background: #0f1825;
+#             color: white;
+#             border: 1px solid #2a3a55;
+#             border-radius: 8px;
+#             cursor: pointer;
+#         }
+#         .chat-area {
+#             flex: 1;
+#             display: flex;
+#             flex-direction: column;
+#             overflow: hidden;
+#         }
+#         .chat-header {
+#             padding: 20px;
+#             background: rgba(10, 20, 35, 0.8);
+#             border-bottom: 1px solid #2a3a55;
+#         }
+#         .chat-header h1 {
+#             font-size: 1.4rem;
+#             display: flex;
+#             align-items: center;
+#             gap: 10px;
+#         }
+#         .chat-messages {
+#             flex: 1;
+#             overflow-y: auto;
+#             padding: 20px;
+#             display: flex;
+#             flex-direction: column;
+#             gap: 12px;
+#         }
+#         .message {
+#             max-width: 70%;
+#             padding: 10px 15px;
+#             border-radius: 18px;
+#             line-height: 1.4;
+#             animation: fadeIn 0.2s ease;
+#         }
+#         .user-message {
+#             align-self: flex-end;
+#             background: #1f3a5f;
+#             border-bottom-right-radius: 4px;
+#         }
+#         .exon-message {
+#             align-self: flex-start;
+#             background: #1e2a3a;
+#             border-bottom-left-radius: 4px;
+#         }
+#         .message-meta {
+#             font-size: 0.7rem;
+#             color: #888;
+#             margin-top: 4px;
+#         }
+#         .chat-input-area {
+#             padding: 20px;
+#             background: rgba(10, 20, 35, 0.9);
+#             border-top: 1px solid #2a3a55;
+#             display: flex;
+#             gap: 10px;
+#         }
+#         .chat-input-area input {
+#             flex: 1;
+#             padding: 12px;
+#             background: #0f1825;
+#             border: 1px solid #2a3a55;
+#             border-radius: 28px;
+#             color: white;
+#             outline: none;
+#         }
+#         .chat-input-area button {
+#             padding: 0 20px;
+#             background: #7aa2f7;
+#             border: none;
+#             border-radius: 28px;
+#             font-weight: bold;
+#             cursor: pointer;
+#             transition: 0.2s;
+#         }
+#         .chat-input-area button:hover {
+#             background: #5a82d7;
+#         }
+#         @keyframes fadeIn {
+#             from { opacity: 0; transform: translateY(4px); }
+#             to { opacity: 1; transform: translateY(0); }
+#         }
+#         .thinking {
+#             font-style: italic;
+#             color: #aaa;
+#             align-self: flex-start;
+#             padding: 8px 15px;
+#         }
+#         ::-webkit-scrollbar {
+#             width: 6px;
+#         }
+#         ::-webkit-scrollbar-track {
+#             background: #0f1825;
+#         }
+#         ::-webkit-scrollbar-thumb {
+#             background: #2a3a55;
+#             border-radius: 3px;
+#         }
+#     </style>
+# </head>
+# <body>
+# <div class="sidebar">
+#     <h2>Exon State</h2>
+#     <div class="status-card">
+#         <h3>Current Emotion</h3>
+#         <div class="emotion" id="emotion">—</div>
+#         <div class="intensity">Intensity: <span id="intensity">0.0</span></div>
+#         <div class="confidence">Confidence: <span id="confidence">0.0</span></div>
+#     </div>
+#     <div class="status-card">
+#         <h3>Memory Count</h3>
+#         <div class="memory-count" id="memoryCount">0</div>
+#     </div>
+#     <div class="status-card">
+#         <h3>Active Goals</h3>
+#         <ul class="goals-list" id="goalsList">
+#             <li>—</li>
+#         </ul>
+#     </div>
+#     <div class="persona-selector">
+#         <label>Persona</label>
+#         <select id="personaSelect">
+#             <option value="Maya">Maya (Operations)</option>
+#             <option value="Raj">Raj (Finance)</option>
+#             <option value="Priya">Priya (Growth)</option>
+#             <option value="Arjun">Arjun (Strategy)</option>
+#         </select>
+#     </div>
+# </div>
+# <div class="chat-area">
+#     <div class="chat-header">
+#         <h1>EXN-001 · Exon Consciousness</h1>
+#     </div>
+#     <div class="chat-messages" id="chatMessages">
+#         <div class="message exon-message">Hello Founder. I am awake. How may I assist you today?</div>
+#     </div>
+#     <div class="chat-input-area">
+#         <input type="text" id="messageInput" placeholder="Type your message..." autofocus>
+#         <button id="sendBtn">Send</button>
+#     </div>
+# </div>
+
+# <script>
+#     let sessionId = "web_" + Date.now();
+#     const apiBase = window.location.origin;
+
+#     async function updateStatus() {
+#         try {
+#             const res = await fetch(apiBase + "/status");
+#             const data = await res.json();
+#             document.getElementById("emotion").innerText = data.emotion || "?";
+#             document.getElementById("intensity").innerText = data.emotion_intensity.toFixed(2);
+#             document.getElementById("confidence").innerText = (data.confidence || 0.5).toFixed(2);
+#             document.getElementById("memoryCount").innerText = data.memory_count;
+
+#             const goals = data.active_goals || [];
+#             const goalsContainer = document.getElementById("goalsList");
+#             if (goals.length === 0) {
+#                 goalsContainer.innerHTML = "<li>No active goals</li>";
+#             } else {
+#                 goalsContainer.innerHTML = goals.map(g => `
+#                     <li>
+#                         ${escapeHtml(g.description)}
+#                         <div class="progress-bar"><div class="progress-fill" style="width: ${(g.progress || 0)*100}%"></div></div>
+#                     </li>
+#                 `).join("");
+#             }
+#         } catch(e) { console.error(e); }
+#     }
+
+#     async function sendMessage() {
+#         const input = document.getElementById("messageInput");
+#         const text = input.value.trim();
+#         if (!text) return;
+#         input.value = "";
+#         input.disabled = true;
+#         document.getElementById("sendBtn").disabled = true;
+
+#         addMessage(text, "user");
+#         const thinkingDiv = addThinking();
+
+#         try {
+#             const persona = document.getElementById("personaSelect").value;
+#             const res = await fetch(apiBase + "/chat", {
+#                 method: "POST",
+#                 headers: { "Content-Type": "application/json" },
+#                 body: JSON.stringify({
+#                     message: text,
+#                     persona: persona,
+#                     session_id: sessionId
+#                 })
+#             });
+#             const data = await res.json();
+#             removeThinking(thinkingDiv);
+#             addMessage(data.response, "exon", data.emotion);
+#             updateStatus();
+#         } catch(e) {
+#             removeThinking(thinkingDiv);
+#             addMessage("Error: Could not reach Exon consciousness.", "exon");
+#         } finally {
+#             input.disabled = false;
+#             document.getElementById("sendBtn").disabled = false;
+#             input.focus();
+#         }
+#     }
+
+#     function addMessage(text, sender, emotion = null) {
+#         const messagesDiv = document.getElementById("chatMessages");
+#         const msgDiv = document.createElement("div");
+#         msgDiv.className = `message ${sender === "user" ? "user-message" : "exon-message"}`;
+#         msgDiv.innerHTML = `<div>${escapeHtml(text)}</div>`;
+#         if (emotion && sender === "exon") {
+#             msgDiv.innerHTML += `<div class="message-meta">🤖 ${escapeHtml(emotion)}</div>`;
+#         }
+#         messagesDiv.appendChild(msgDiv);
+#         messagesDiv.scrollTop = messagesDiv.scrollHeight;
+#     }
+
+#     function addThinking() {
+#         const messagesDiv = document.getElementById("chatMessages");
+#         const div = document.createElement("div");
+#         div.className = "thinking";
+#         div.innerText = "Exon is thinking...";
+#         messagesDiv.appendChild(div);
+#         messagesDiv.scrollTop = messagesDiv.scrollHeight;
+#         return div;
+#     }
+
+#     function removeThinking(div) {
+#         if (div && div.remove) div.remove();
+#     }
+
+#     function escapeHtml(str) {
+#         if (!str) return '';
+#         return str.replace(/[&<>]/g, function(m) {
+#             if (m === '&') return '&amp;';
+#             if (m === '<') return '&lt;';
+#             if (m === '>') return '&gt;';
+#             return m;
+#         });
+#     }
+
+#     setInterval(updateStatus, 5000);
+#     updateStatus();
+
+#     document.getElementById("sendBtn").addEventListener("click", sendMessage);
+#     document.getElementById("messageInput").addEventListener("keypress", (e) => {
+#         if (e.key === "Enter") sendMessage();
+#     });
+# </script>
+# </body>
+# </html>"""
+#     # Return as HTMLResponse with explicit UTF-8 encoding
+#     return HTMLResponse(content=html_content, status_code=200)
+
 @app.get("/ui", response_class=HTMLResponse)
 async def chat_ui():
     html_content = """<!DOCTYPE html>
@@ -169,6 +534,34 @@ async def chat_ui():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Exon Consciousness Interface</title>
     <style>
+        :root {
+            --bg-gradient-start: #0a0f1e;
+            --bg-gradient-end: #0a1a2a;
+            --text-primary: #e0e0e0;
+            --sidebar-bg: rgba(20, 30, 45, 0.9);
+            --card-bg: #0f1825;
+            --border-color: #2a3a55;
+            --user-msg-bg: #1f3a5f;
+            --exon-msg-bg: #1e2a3a;
+            --accent: #7aa2f7;
+            --accent-hover: #5a82d7;
+            --emotion-color: #ffb347;
+            --memory-count-color: #7dcfff;
+        }
+        body.light {
+            --bg-gradient-start: #f0f2f5;
+            --bg-gradient-end: #e0e5ec;
+            --text-primary: #1a1a2e;
+            --sidebar-bg: rgba(255, 255, 255, 0.95);
+            --card-bg: #ffffff;
+            --border-color: #ddd;
+            --user-msg-bg: #d0e2ff;
+            --exon-msg-bg: #e9ecef;
+            --accent: #3b71ca;
+            --accent-hover: #2c5aa6;
+            --emotion-color: #e67e22;
+            --memory-count-color: #1e88e5;
+        }
         * {
             margin: 0;
             padding: 0;
@@ -176,17 +569,18 @@ async def chat_ui():
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0a0f1e 0%, #0a1a2a 100%);
-            color: #e0e0e0;
+            background: linear-gradient(135deg, var(--bg-gradient-start) 0%, var(--bg-gradient-end) 100%);
+            color: var(--text-primary);
             height: 100vh;
             display: flex;
             overflow: hidden;
+            transition: background 0.3s, color 0.3s;
         }
         .sidebar {
-            width: 280px;
-            background: rgba(20, 30, 45, 0.9);
+            width: 300px;
+            background: var(--sidebar-bg);
             backdrop-filter: blur(10px);
-            border-right: 1px solid #2a3a55;
+            border-right: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
             padding: 20px;
@@ -195,16 +589,19 @@ async def chat_ui():
         .sidebar h2 {
             font-size: 1.3rem;
             margin-bottom: 20px;
-            color: #7aa2f7;
-            border-left: 3px solid #7aa2f7;
+            color: var(--accent);
+            border-left: 3px solid var(--accent);
             padding-left: 12px;
         }
+        .sidebar-section {
+            margin-bottom: 25px;
+        }
         .status-card {
-            background: #0f1825;
+            background: var(--card-bg);
             border-radius: 12px;
             padding: 15px;
             margin-bottom: 20px;
-            border: 1px solid #2a3a55;
+            border: 1px solid var(--border-color);
         }
         .status-card h3 {
             font-size: 0.9rem;
@@ -216,29 +613,20 @@ async def chat_ui():
         .emotion {
             font-size: 2rem;
             font-weight: bold;
-            color: #ffb347;
-        }
-        .intensity {
-            font-size: 1.2rem;
-            margin-top: 5px;
-        }
-        .confidence {
-            font-size: 1rem;
-            margin-top: 5px;
+            color: var(--emotion-color);
         }
         .memory-count {
             font-size: 1.5rem;
             font-weight: bold;
-            color: #7dcfff;
+            color: var(--memory-count-color);
         }
         .goals-list {
             list-style: none;
-            margin-top: 8px;
         }
         .goals-list li {
             padding: 5px 0;
             font-size: 0.85rem;
-            border-bottom: 1px solid #2a3a55;
+            border-bottom: 1px solid var(--border-color);
         }
         .progress-bar {
             background: #2a3a55;
@@ -248,23 +636,40 @@ async def chat_ui():
             overflow: hidden;
         }
         .progress-fill {
-            background: #7aa2f7;
+            background: var(--accent);
             width: 0%;
             height: 100%;
-            border-radius: 8px;
         }
-        .persona-selector {
-            margin-top: auto;
-            margin-bottom: 20px;
+        .memory-item {
+            font-size: 0.8rem;
+            padding: 6px 0;
+            border-bottom: 1px dashed var(--border-color);
         }
-        .persona-selector select {
+        .memory-item small {
+            color: #888;
+        }
+        .thought-item {
+            font-size: 0.8rem;
+            padding: 6px 0;
+            font-style: italic;
+        }
+        .persona-selector, .theme-toggle {
+            margin-top: 10px;
+        }
+        select, button.theme-btn {
             width: 100%;
             padding: 8px;
-            background: #0f1825;
-            color: white;
-            border: 1px solid #2a3a55;
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             cursor: pointer;
+        }
+        .export-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            margin-top: 10px;
         }
         .chat-area {
             flex: 1;
@@ -275,13 +680,10 @@ async def chat_ui():
         .chat-header {
             padding: 20px;
             background: rgba(10, 20, 35, 0.8);
-            border-bottom: 1px solid #2a3a55;
-        }
-        .chat-header h1 {
-            font-size: 1.4rem;
+            border-bottom: 1px solid var(--border-color);
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 10px;
         }
         .chat-messages {
             flex: 1;
@@ -300,12 +702,12 @@ async def chat_ui():
         }
         .user-message {
             align-self: flex-end;
-            background: #1f3a5f;
+            background: var(--user-msg-bg);
             border-bottom-right-radius: 4px;
         }
         .exon-message {
             align-self: flex-start;
-            background: #1e2a3a;
+            background: var(--exon-msg-bg);
             border-bottom-left-radius: 4px;
         }
         .message-meta {
@@ -316,22 +718,22 @@ async def chat_ui():
         .chat-input-area {
             padding: 20px;
             background: rgba(10, 20, 35, 0.9);
-            border-top: 1px solid #2a3a55;
+            border-top: 1px solid var(--border-color);
             display: flex;
             gap: 10px;
         }
         .chat-input-area input {
             flex: 1;
             padding: 12px;
-            background: #0f1825;
-            border: 1px solid #2a3a55;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
             border-radius: 28px;
-            color: white;
+            color: var(--text-primary);
             outline: none;
         }
         .chat-input-area button {
             padding: 0 20px;
-            background: #7aa2f7;
+            background: var(--accent);
             border: none;
             border-radius: 28px;
             font-weight: bold;
@@ -339,11 +741,7 @@ async def chat_ui():
             transition: 0.2s;
         }
         .chat-input-area button:hover {
-            background: #5a82d7;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(4px); }
-            to { opacity: 1; transform: translateY(0); }
+            background: var(--accent-hover);
         }
         .thinking {
             font-style: italic;
@@ -351,15 +749,13 @@ async def chat_ui():
             align-self: flex-start;
             padding: 8px 15px;
         }
-        ::-webkit-scrollbar {
-            width: 6px;
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-        ::-webkit-scrollbar-track {
-            background: #0f1825;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #2a3a55;
-            border-radius: 3px;
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
     </style>
 </head>
@@ -369,8 +765,8 @@ async def chat_ui():
     <div class="status-card">
         <h3>Current Emotion</h3>
         <div class="emotion" id="emotion">—</div>
-        <div class="intensity">Intensity: <span id="intensity">0.0</span></div>
-        <div class="confidence">Confidence: <span id="confidence">0.0</span></div>
+        <div>Intensity: <span id="intensity">0.0</span></div>
+        <div>Confidence: <span id="confidence">0.0</span></div>
     </div>
     <div class="status-card">
         <h3>Memory Count</h3>
@@ -378,10 +774,21 @@ async def chat_ui():
     </div>
     <div class="status-card">
         <h3>Active Goals</h3>
-        <ul class="goals-list" id="goalsList">
-            <li>—</li>
-        </ul>
+        <ul class="goals-list" id="goalsList"><li>—</li></ul>
     </div>
+
+    <!-- Memory Inspector -->
+    <div class="sidebar-section">
+        <h3>📝 Recent Memories</h3>
+        <div id="memoryList" style="max-height: 200px; overflow-y: auto;">Loading...</div>
+    </div>
+
+    <!-- Autonomous Thoughts -->
+    <div class="sidebar-section">
+        <h3>💭 Autonomous Thoughts</h3>
+        <div id="thoughtsList" style="max-height: 150px; overflow-y: auto;">Loading...</div>
+    </div>
+
     <div class="persona-selector">
         <label>Persona</label>
         <select id="personaSelect">
@@ -391,7 +798,12 @@ async def chat_ui():
             <option value="Arjun">Arjun (Strategy)</option>
         </select>
     </div>
+    <div class="theme-toggle">
+        <button id="themeToggleBtn" class="theme-btn">🌓 Dark/Light</button>
+    </div>
+    <button id="exportBtn" class="export-btn">📥 Export Conversation</button>
 </div>
+
 <div class="chat-area">
     <div class="chat-header">
         <h1>EXN-001 · Exon Consciousness</h1>
@@ -408,6 +820,21 @@ async def chat_ui():
 <script>
     let sessionId = "web_" + Date.now();
     const apiBase = window.location.origin;
+    let currentTheme = localStorage.getItem("theme") || "dark";
+
+    function setTheme(theme) {
+        if (theme === "light") {
+            document.body.classList.add("light");
+        } else {
+            document.body.classList.remove("light");
+        }
+        localStorage.setItem("theme", theme);
+        currentTheme = theme;
+    }
+    setTheme(currentTheme);
+    document.getElementById("themeToggleBtn").addEventListener("click", () => {
+        setTheme(currentTheme === "dark" ? "light" : "dark");
+    });
 
     async function updateStatus() {
         try {
@@ -429,6 +856,40 @@ async def chat_ui():
                         <div class="progress-bar"><div class="progress-fill" style="width: ${(g.progress || 0)*100}%"></div></div>
                     </li>
                 `).join("");
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    async function fetchMemories() {
+        try {
+            const res = await fetch(apiBase + "/memories?limit=5");
+            const data = await res.json();
+            const memories = data.memories || [];
+            const container = document.getElementById("memoryList");
+            if (memories.length === 0) {
+                container.innerHTML = "No memories yet.";
+            } else {
+                container.innerHTML = memories.map(m => `
+                    <div class="memory-item">
+                        <div><strong>You:</strong> ${escapeHtml(m.user?.substring(0, 80))}${m.user?.length > 80 ? "..." : ""}</div>
+                        <div><strong>Exon:</strong> ${escapeHtml(m.assistant?.substring(0, 80))}${m.assistant?.length > 80 ? "..." : ""}</div>
+                        <small>${m.emotion || "neutral"} · ${new Date(m.timestamp).toLocaleTimeString()}</small>
+                    </div>
+                `).join("");
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    async function fetchThoughts() {
+        try {
+            const res = await fetch(apiBase + "/thoughts?limit=5");
+            const data = await res.json();
+            const thoughts = data.thoughts || [];
+            const container = document.getElementById("thoughtsList");
+            if (thoughts.length === 0) {
+                container.innerHTML = "No autonomous thoughts yet.";
+            } else {
+                container.innerHTML = thoughts.map(t => `<div class="thought-item">💭 ${escapeHtml(t)}</div>`).join("");
             }
         } catch(e) { console.error(e); }
     }
@@ -459,6 +920,8 @@ async def chat_ui():
             removeThinking(thinkingDiv);
             addMessage(data.response, "exon", data.emotion);
             updateStatus();
+            fetchMemories();
+            fetchThoughts();
         } catch(e) {
             removeThinking(thinkingDiv);
             addMessage("Error: Could not reach Exon consciousness.", "exon");
@@ -495,6 +958,27 @@ async def chat_ui():
         if (div && div.remove) div.remove();
     }
 
+    function exportConversation() {
+        const messages = document.querySelectorAll("#chatMessages .message");
+        let exportText = `Exon Conversation Export\nID: ${sessionId}\nDate: ${new Date().toISOString()}\n\n`;
+        messages.forEach(msg => {
+            const isUser = msg.classList.contains("user-message");
+            const content = msg.querySelector("div").innerText;
+            const meta = msg.querySelector(".message-meta");
+            const emotion = meta ? meta.innerText.replace("🤖 ", "") : "";
+            exportText += `${isUser ? "User" : "Exon"}: ${content}\n`;
+            if (emotion) exportText += `[Emotion: ${emotion}]\n`;
+            exportText += "\n";
+        });
+        const blob = new Blob([exportText], { type: "text/plain" });
+        const a = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        a.href = url;
+        a.download = `exon_conversation_${sessionId}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, function(m) {
@@ -505,17 +989,25 @@ async def chat_ui():
         });
     }
 
-    setInterval(updateStatus, 5000);
+    // Polling
+    setInterval(() => {
+        updateStatus();
+        fetchMemories();
+        fetchThoughts();
+    }, 5000);
+
     updateStatus();
+    fetchMemories();
+    fetchThoughts();
 
     document.getElementById("sendBtn").addEventListener("click", sendMessage);
     document.getElementById("messageInput").addEventListener("keypress", (e) => {
         if (e.key === "Enter") sendMessage();
     });
+    document.getElementById("exportBtn").addEventListener("click", exportConversation);
 </script>
 </body>
 </html>"""
-    # Return as HTMLResponse with explicit UTF-8 encoding
     return HTMLResponse(content=html_content, status_code=200)
 
 if __name__ == "__main__":
