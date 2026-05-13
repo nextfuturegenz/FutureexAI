@@ -1,0 +1,65 @@
+<!-- exon/api/ui/index.html -->
+<!-- Author: Ashish Pal -->
+<!-- Purpose: Main chat interface HTML -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exon Consciousness Interface</title>
+    <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<div class="sidebar">
+    <h2>Exon State</h2>
+    <div class="status-card">
+        <h3>Current Emotion</h3>
+        <div class="emotion" id="emotion">—</div>
+        <div>Intensity: <span id="intensity">0.0</span></div>
+        <div>Confidence: <span id="confidence">0.0</span></div>
+    </div>
+    <div class="status-card">
+        <h3>Memory Count</h3>
+        <div class="memory-count" id="memoryCount">0</div>
+    </div>
+    <div class="status-card">
+        <h3>Active Goals</h3>
+        <ul class="goals-list" id="goalsList"><li>—</li></ul>
+    </div>
+    <div class="sidebar-section">
+        <h3>📝 Recent Memories</h3>
+        <div id="memoryList" style="max-height: 200px; overflow-y: auto;">Loading...</div>
+    </div>
+    <div class="sidebar-section">
+        <h3>💭 Autonomous Thoughts</h3>
+        <div id="thoughtsList" style="max-height: 150px; overflow-y: auto;">Loading...</div>
+    </div>
+    <div class="persona-selector">
+        <label>Persona</label>
+        <select id="personaSelect">
+            <option value="Maya">Maya (Operations)</option>
+            <option value="Raj">Raj (Finance)</option>
+            <option value="Priya">Priya (Growth)</option>
+            <option value="Arjun">Arjun (Strategy)</option>
+        </select>
+    </div>
+    <div class="theme-toggle">
+        <button id="themeToggleBtn" class="theme-btn">🌓 Dark/Light</button>
+    </div>
+    <button id="exportBtn" class="export-btn">📥 Export Conversation</button>
+</div>
+<div class="chat-area">
+    <div class="chat-header">
+        <h1>EXN-001 · Exon Consciousness</h1>
+    </div>
+    <div class="chat-messages" id="chatMessages">
+        <div class="message exon-message">Hello Founder. I am awake. How may I assist you today?</div>
+    </div>
+    <div class="chat-input-area">
+        <input type="text" id="messageInput" placeholder="Type your message..." autofocus>
+        <button id="sendBtn">Send</button>
+    </div>
+</div>
+<script src="/ui/script.js"></script>
+</body>
+</html>
