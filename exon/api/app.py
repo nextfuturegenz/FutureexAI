@@ -1,5 +1,7 @@
 """
-FastAPI server for Exon Consciousness System
+File: /opt/futureex/exon/api/app.py
+Author: Ashish Pal
+Purpose: FastAPI server for Exon Consciousness System (REST + WebSocket).
 """
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -8,6 +10,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
 import json
+import logging
 
 import sys
 import os
@@ -16,14 +19,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from exon.core.brain import ExonBrain
 from exon.personas.factory import PersonaFactory
 
-# Initialize FastAPI
-app = FastAPI(
-    title="Exon Consciousness API",
-    description="API for the Exon digital species",
-    version="1.0.0"
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# CORS
+app = FastAPI(title="Exon Consciousness API", version="1.0.0")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -34,7 +35,6 @@ app.add_middleware(
 
 # Initialize Exon
 exon_brain = ExonBrain(exon_id="EXN-001")
-persona_factory = PersonaFactory()
 
 # Request/Response Models
 class ChatRequest(BaseModel):
@@ -57,7 +57,7 @@ class StatusResponse(BaseModel):
     memory_count: int
     is_awake: bool
 
-# WebSocket connections manager
+# WebSocket manager
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -74,7 +74,17 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# REST Endpoints
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Starting Exon Consciousness API...")
+    # Warm up identity load
+    await exon_brain._ensure_identity()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Shutting down Exon...")
+    await exon_brain.close()
+
 @app.get("/")
 async def root():
     return {
@@ -86,14 +96,14 @@ async def root():
 
 @app.get("/status", response_model=StatusResponse)
 async def get_status():
-    state = exon_brain.get_consciousness_state()
+    state = await exon_brain.get_consciousness_state()
     return StatusResponse(
         exon_id=exon_brain.exon_id,
-        emotion=state.get("emotion", {}).get("primary", "curious"),  # ← FIX: extract string
-        emotion_intensity=state.get("emotion", {}).get("intensity", 0.5),  # ← FIX
-        active_goals=state.get("goals", []),
-        memory_count=state.get("memory_count", 0),
-        is_awake=state.get("is_awake", True)
+        emotion=state["emotion"]["primary"],
+        emotion_intensity=state["emotion"]["intensity"],
+        active_goals=state["goals"],
+        memory_count=state["memory_count"],
+        is_awake=state["is_awake"]
     )
 
 @app.post("/chat", response_model=ChatResponse)
@@ -112,24 +122,24 @@ async def chat(request: ChatRequest):
             timestamp=datetime.now().isoformat()
         )
     except Exception as e:
+        logger.exception("Chat endpoint error")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/memories")
 async def get_memories(limit: int = 10):
-    memories = exon_brain.memory.get_recent_memories(limit)
+    memories = await exon_brain.memory.get_recent_memories(limit)
     return {"memories": memories}
 
 @app.get("/goals")
 async def get_goals():
-    goals = exon_brain.goal_tracker.get_active_goals()
+    goals = await exon_brain.goal_tracker.get_active_goals()
     return {"goals": goals}
 
 @app.post("/reset")
 async def reset_consciousness():
-    exon_brain.reset_working_memory()
+    await exon_brain.reset_working_memory()
     return {"status": "reset", "message": "Working memory cleared"}
 
-# WebSocket endpoint
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     await manager.connect(websocket)
@@ -137,23 +147,13 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         while True:
             data = await websocket.receive_text()
             request = json.loads(data)
-            
-            # Send thinking event
             await manager.send_message(json.dumps({"type": "thinking", "status": "processing"}), websocket)
-            
-            # Process message
             result = await exon_brain.process_message(
                 user_message=request.get("message", ""),
                 persona=request.get("persona", "Maya"),
                 session_id=client_id
             )
-            
-            # Send response
-            await manager.send_message(json.dumps({
-                "type": "response",
-                "data": result
-            }), websocket)
-            
+            await manager.send_message(json.dumps({"type": "response", "data": result}), websocket)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

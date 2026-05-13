@@ -1,5 +1,7 @@
 """
-Health check script for Exon system
+File: /opt/futureex/exon/scripts/health_check.py
+Author: Ashish Pal
+Purpose: Validate all Exon dependencies (PostgreSQL, Redis, Ollama).
 """
 
 import sys
@@ -8,17 +10,11 @@ import redis
 import psycopg2
 import requests
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-
 def check_health():
-    """Check all Exon dependencies"""
-    
     print("\n🏥 EXON HEALTH CHECK\n")
-    
     issues = []
-    
-    # Check Redis
+
+    # Redis
     try:
         r = redis.Redis(
             host=os.environ.get("REDIS_HOST", "localhost"),
@@ -30,8 +26,8 @@ def check_health():
     except Exception as e:
         print(f"❌ Redis: {e}")
         issues.append("Redis connection failed")
-    
-    # Check PostgreSQL
+
+    # PostgreSQL
     try:
         conn = psycopg2.connect(
             host=os.environ.get("DB_HOST", "localhost"),
@@ -45,19 +41,19 @@ def check_health():
     except Exception as e:
         print(f"❌ PostgreSQL: {e}")
         issues.append("PostgreSQL connection failed")
-    
-    # Check Ollama
+
+    # Ollama
     try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=5)
-        if response.status_code == 200:
+        resp = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if resp.status_code == 200:
             print("✅ Ollama: Running")
         else:
-            print(f"❌ Ollama: Status {response.status_code}")
+            print(f"❌ Ollama: Status {resp.status_code}")
             issues.append("Ollama not responding")
     except Exception as e:
         print(f"❌ Ollama: {e}")
         issues.append("Ollama connection failed")
-    
+
     print("\n" + "="*30)
     if issues:
         print(f"⚠️ Issues found: {len(issues)}")
@@ -66,10 +62,7 @@ def check_health():
     else:
         print("✅ All systems healthy!")
     print("="*30 + "\n")
-    
     return len(issues) == 0
 
-
 if __name__ == "__main__":
-    healthy = check_health()
-    sys.exit(0 if healthy else 1)
+    sys.exit(0 if check_health() else 1)

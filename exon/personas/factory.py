@@ -1,13 +1,12 @@
 """
-Persona Factory - Create and manage Exon personas
+File: /opt/futureex/exon/personas/factory.py
+Author: Ashish Pal
+Purpose: Persona definitions for Exon's multiple identities.
 """
 
 from typing import Dict, Any
 
-
 class PersonaFactory:
-    """Factory for creating Exon personas"""
-    
     PERSONAS = {
         "Maya": {
             "name": "Maya",
@@ -38,27 +37,21 @@ class PersonaFactory:
             "response_style": "strategic and comprehensive"
         }
     }
-    
+
     @classmethod
     def get_persona(cls, name: str) -> Dict[str, Any]:
-        """Get persona configuration"""
         return cls.PERSONAS.get(name, cls.PERSONAS["Maya"])
-    
+
     @classmethod
     def list_personas(cls) -> list:
-        """List all available personas"""
         return list(cls.PERSONAS.keys())
-    
+
     @classmethod
     def get_persona_prompt(cls, persona_name: str) -> str:
-        """Get persona-specific prompt injection"""
         persona = cls.get_persona(persona_name)
-        
-        prompt = f"""You are speaking as {persona_name}, the {persona['role']} specialist.
+        return f"""You are speaking as {persona_name}, the {persona['role']} specialist.
 
 Your traits: {', '.join(persona['traits'])}
 Your style: {persona['response_style']}
 
 Always respond in character as {persona_name}."""
-        
-        return prompt

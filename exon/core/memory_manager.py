@@ -1,36 +1,27 @@
 """
-Memory Manager - Coordinates Redis (working) and PostgreSQL (long-term)
+File: /opt/futureex/exon/core/memory_manager.py
+Author: Ashish Pal
+Purpose: Coordinate working memory (Redis) and long‑term memory (PostgreSQL) with proper FK mapping.
 """
 
-import redis
-import psycopg2
-import os
 import json
+import logging
 from typing import List, Dict, Optional
 from datetime import datetime
+import redis.asyncio as redis
+import psycopg2
+from psycopg2.extras import Json
 
+logger = logging.getLogger(__name__)
 
 class MemoryManager:
-    def __init__(self, exon_id: str):
+    def __init__(self, exon_id: str, redis_client: redis.Redis, pg_conn):
         self.exon_id = exon_id
-        self.redis_client = redis.Redis(
-            host=os.environ.get("REDIS_HOST", "localhost"),
-            port=int(os.environ.get("REDIS_PORT", 6379)),
-            decode_responses=True
-        )
-        
-        # PostgreSQL connection
-        self.pg_conn = psycopg2.connect(
-            host=os.environ.get("DB_HOST", "localhost"),
-            port=os.environ.get("DB_PORT", "5432"),
-            dbname=os.environ.get("DB_NAME", "futureex"),
-            user=os.environ.get("DB_USER", "futureex"),
-            password=os.environ.get("DB_PASSWORD", "futureex123")
-        )
-    
-    def store(self, user_message: str, ai_response: str, session_id: Optional[str], emotion: dict):
-        """Store conversation in both Redis (recent) and PostgreSQL (permanent)"""
-    
+        self.redis = redis_client
+        self.pg_conn = pg_conn
+
+    async def store(self, user_message: str, ai_response: str, session_id: Optional[str],
+                    emotion: dict, exon_db_id: int):
         memory_entry = {
             "user": user_message,
             "assistant": ai_response,
@@ -38,78 +29,60 @@ class MemoryManager:
             "timestamp": datetime.now().isoformat(),
             "session_id": session_id
         }
-    
-        # Store in Redis (working memory)
+
+        # Redis working memory
         redis_key = f"{self.exon_id}:memory:recent"
-        self.redis_client.lpush(redis_key, json.dumps(memory_entry))
-        self.redis_client.ltrim(redis_key, 0, 49)
-        
-        # Store in PostgreSQL (long-term) - use exon_str_id
+        await self.redis.lpush(redis_key, json.dumps(memory_entry))
+        await self.redis.ltrim(redis_key, 0, 49)
+
+        # PostgreSQL long‑term
         try:
-            cursor = self.pg_conn.cursor()
-            cursor.execute("""
-                INSERT INTO exon_memories (exon_id, memory_type, content, emotion_at_time, created_at)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (
-                self.exon_id,  # Now string "EXN-001"
-                "conversation",
-                json.dumps(memory_entry),
-                emotion.get("primary"),
-                datetime.now()
-            ))
-            self.pg_conn.commit()
-            cursor.close()
+            with self.pg_conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO exon_memories (exon_id, memory_type, content, emotion_at_time, created_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (exon_db_id, "conversation", Json(memory_entry), emotion.get("primary"), datetime.now()))
+                self.pg_conn.commit()
         except Exception as e:
-            print(f"[MEMORY] PG store error: {e}")
-            # Rollback on error
+            logger.error(f"Failed to store memory in Postgres: {e}")
             self.pg_conn.rollback()
 
-    def recall(self, keyword: str, limit: int = 5) -> List[Dict]:
-        """Recall relevant memories based on keyword"""
+    async def recall(self, keyword: str, limit: int = 5, exon_db_id: Optional[int] = None) -> List[Dict]:
         memories = []
-        
-        # First try Redis (working memory)
-        redis_memories = self.redis_client.lrange(f"{self.exon_id}:memory:recent", 0, limit - 1)
+        # Redis working memory
+        redis_memories = await self.redis.lrange(f"{self.exon_id}:memory:recent", 0, limit - 1)
         for mem in redis_memories:
             try:
                 memories.append(json.loads(mem))
             except:
                 pass
-        
-        # Then try PostgreSQL if more needed
-        if len(memories) < limit:
+
+        if len(memories) < limit and exon_db_id is not None:
             try:
-                cursor = self.pg_conn.cursor()
-                cursor.execute("""
-                    SELECT content FROM exon_memories 
-                    WHERE exon_id = %s AND content::text LIKE %s
-                    ORDER BY created_at DESC LIMIT %s
-                """, (self.exon_id, f"%{keyword}%", limit - len(memories)))
-                
-                for row in cursor.fetchall():
-                    memories.append(json.loads(row[0]))
-                cursor.close()
+                with self.pg_conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT content FROM exon_memories
+                        WHERE exon_id = %s AND content::text ILIKE %s
+                        ORDER BY created_at DESC LIMIT %s
+                    """, (exon_db_id, f"%{keyword}%", limit - len(memories)))
+                    for row in cur.fetchall():
+                        memories.append(row[0])
             except Exception as e:
-                print(f"[MEMORY] PG recall error: {e}")
-                self.pg_conn.rollback()
-    
+                logger.error(f"Recall from Postgres failed: {e}")
         return memories
-    
-    def get_recent_memories(self, limit: int = 10) -> List[Dict]:
-        """Get recent memories from working memory"""
+
+    async def get_recent_memories(self, limit: int = 10) -> List[Dict]:
         memories = []
-        redis_memories = self.redis_client.lrange(f"{self.exon_id}:memory:recent", 0, limit - 1)
+        redis_memories = await self.redis.lrange(f"{self.exon_id}:memory:recent", 0, limit - 1)
         for mem in redis_memories:
             try:
                 memories.append(json.loads(mem))
             except:
                 pass
         return memories
-    
-    def get_memory_count(self) -> int:
-        """Get total memory count"""
-        return self.redis_client.llen(f"{self.exon_id}:memory:recent")
-    
-    def clear_working_memory(self):
-        """Clear working memory"""
-        self.redis_client.delete(f"{self.exon_id}:memory:recent")
+
+    async def get_memory_count(self) -> int:
+        return await self.redis.llen(f"{self.exon_id}:memory:recent")
+
+    async def clear_working_memory(self):
+        await self.redis.delete(f"{self.exon_id}:memory:recent")
