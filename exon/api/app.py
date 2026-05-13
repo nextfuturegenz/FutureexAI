@@ -1,22 +1,20 @@
 """
 File: /opt/futureex/exon/api/app.py
 Author: Ashish Pal
-Purpose: FastAPI server for Exon Consciousness System (REST + WebSocket).
+Purpose: FastAPI server for Exon Consciousness System (REST + WebSocket + Web UI).
 """
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-import os
 import json
 import logging
-
 import sys
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from exon.core.brain import ExonBrain
@@ -80,7 +78,6 @@ manager = ConnectionManager()
 @app.on_event("startup")
 async def startup_event():
     logger.info("Starting Exon Consciousness API...")
-    # Warm up identity load
     await exon_brain._ensure_identity()
 
 @app.on_event("shutdown")
@@ -160,11 +157,12 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# Serve a simple chat UI
+# ------------------------------------------------------------------
+# Web UI - Chat Interface
+# ------------------------------------------------------------------
 @app.get("/ui", response_class=HTMLResponse)
 async def chat_ui():
-    html_content = """
-<!DOCTYPE html>
+    html_content = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -184,7 +182,6 @@ async def chat_ui():
             display: flex;
             overflow: hidden;
         }
-        /* Sidebar */
         .sidebar {
             width: 280px;
             background: rgba(20, 30, 45, 0.9);
@@ -269,7 +266,6 @@ async def chat_ui():
             border-radius: 8px;
             cursor: pointer;
         }
-        /* Main chat area */
         .chat-area {
             flex: 1;
             display: flex;
@@ -369,7 +365,7 @@ async def chat_ui():
 </head>
 <body>
 <div class="sidebar">
-    <h2>🧬 Exon State</h2>
+    <h2>Exon State</h2>
     <div class="status-card">
         <h3>Current Emotion</h3>
         <div class="emotion" id="emotion">—</div>
@@ -398,7 +394,7 @@ async def chat_ui():
 </div>
 <div class="chat-area">
     <div class="chat-header">
-        <h1>✨ EXN-001 · Exon Consciousness</h1>
+        <h1>EXN-001 · Exon Consciousness</h1>
     </div>
     <div class="chat-messages" id="chatMessages">
         <div class="message exon-message">Hello Founder. I am awake. How may I assist you today?</div>
@@ -419,7 +415,7 @@ async def chat_ui():
             const data = await res.json();
             document.getElementById("emotion").innerText = data.emotion || "?";
             document.getElementById("intensity").innerText = data.emotion_intensity.toFixed(2);
-            document.getElementById("confidence").innerText = data.confidence?.toFixed(2) || "0.5";
+            document.getElementById("confidence").innerText = (data.confidence || 0.5).toFixed(2);
             document.getElementById("memoryCount").innerText = data.memory_count;
 
             const goals = data.active_goals || [];
@@ -429,7 +425,7 @@ async def chat_ui():
             } else {
                 goalsContainer.innerHTML = goals.map(g => `
                     <li>
-                        ${g.description}
+                        ${escapeHtml(g.description)}
                         <div class="progress-bar"><div class="progress-fill" style="width: ${(g.progress || 0)*100}%"></div></div>
                     </li>
                 `).join("");
@@ -445,7 +441,6 @@ async def chat_ui():
         input.disabled = true;
         document.getElementById("sendBtn").disabled = true;
 
-        // Add user message to chat
         addMessage(text, "user");
         const thinkingDiv = addThinking();
 
@@ -463,7 +458,6 @@ async def chat_ui():
             const data = await res.json();
             removeThinking(thinkingDiv);
             addMessage(data.response, "exon", data.emotion);
-            // Refresh status after each message
             updateStatus();
         } catch(e) {
             removeThinking(thinkingDiv);
@@ -481,7 +475,7 @@ async def chat_ui():
         msgDiv.className = `message ${sender === "user" ? "user-message" : "exon-message"}`;
         msgDiv.innerHTML = `<div>${escapeHtml(text)}</div>`;
         if (emotion && sender === "exon") {
-            msgDiv.innerHTML += `<div class="message-meta">🤖 ${emotion}</div>`;
+            msgDiv.innerHTML += `<div class="message-meta">🤖 ${escapeHtml(emotion)}</div>`;
         }
         messagesDiv.appendChild(msgDiv);
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -502,17 +496,15 @@ async def chat_ui():
     }
 
     function escapeHtml(str) {
+        if (!str) return '';
         return str.replace(/[&<>]/g, function(m) {
             if (m === '&') return '&amp;';
             if (m === '<') return '&lt;';
             if (m === '>') return '&gt;';
             return m;
-        }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
-            return c;
         });
     }
 
-    // Poll status every 5 seconds
     setInterval(updateStatus, 5000);
     updateStatus();
 
@@ -522,9 +514,9 @@ async def chat_ui():
     });
 </script>
 </body>
-</html>
-    """
-    return HTMLResponse(content=html_content)
+</html>"""
+    # Return as HTMLResponse with explicit UTF-8 encoding
+    return HTMLResponse(content=html_content, status_code=200)
 
 if __name__ == "__main__":
     import uvicorn
