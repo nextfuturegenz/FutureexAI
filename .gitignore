@@ -26,7 +26,6 @@ data/raw/
 data/processed/
 
 # Models - too large for GitHub
-models/
 *.bin
 *.safetensors
 *.gguf

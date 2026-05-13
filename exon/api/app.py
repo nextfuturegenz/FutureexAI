@@ -753,7 +753,7 @@ from fastapi.staticfiles import StaticFiles
 
 from exon.core.brain import ExonBrain
 from exon.api.routes import chat, status, ws
-from exon.api.ui import serve_ui
+from exon.api.ui.serve_ui import serve_ui
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
