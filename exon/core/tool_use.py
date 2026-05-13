@@ -1,15 +1,15 @@
 """
 File: /opt/futureex/exon/core/tool_use.py
 Author: Ashish Pal
-Purpose: Tools: calculator, web search (DuckDuckGo + fallback), time, Wikipedia.
-         Extracts search query from natural language.
+Purpose: Tools: calculator, web search (main DuckDuckGo HTML + suggestions), time, Wikipedia.
 """
 
 import asyncio
 import logging
 import re
+import random
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import redis.asyncio as redis
 import aiohttp
 from bs4 import BeautifulSoup
@@ -17,6 +17,12 @@ from simpleeval import simple_eval
 import wikipedia
 
 logger = logging.getLogger(__name__)
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+]
 
 class ToolUse:
     def __init__(self, exon_id: str, redis_client: redis.Redis):
@@ -26,34 +32,26 @@ class ToolUse:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                }
-            )
+            headers = {"User-Agent": random.choice(USER_AGENTS)}
+            self._session = aiohttp.ClientSession(headers=headers)
         return self._session
 
-    # ------------------------------------------------------------------
-    # Intent detection (with better query extraction)
-    # ------------------------------------------------------------------
     async def detect_tool_intent(self, user_message: str, response: str = "") -> Optional[Dict]:
         msg = user_message.lower()
         # Calculator
-        if re.search(r'(calculate|math|what is|compute|solve|equals?)', msg) or re.search(r'[\d\+\-\*\/\(\)]+', msg):
+        if re.search(r'(calculate|math|what is|compute|solve)', msg) or re.search(r'[\d\+\-\*\/\(\)]{3,}', msg):
             expr = self._extract_expression(msg)
             if expr:
                 return {"tool": "calculator", "expression": expr}
-        # Web search (extract clean query)
+        # Web search – extract clean query
         search_match = re.search(r'(?:search|google|find|look up|tell me about)\s+(?:for\s+)?(.+)', msg, re.IGNORECASE)
         if search_match:
             query = search_match.group(1).strip()
-            # Remove any trailing punctuation
             query = re.sub(r'[.?!]+$', '', query)
             if query:
                 return {"tool": "web_search", "query": query}
-        # Also if user just asks a plain question without keyword, we could still search, but only if it's a clear fact question
+        # Also if user asks a plain factual question
         if re.match(r'^(what|who|where|when|how)\s+', msg) and len(msg.split()) > 3:
-            # Convert whole message to query
             return {"tool": "web_search", "query": user_message}
         # Current time
         if re.search(r'(time|current time|what time|date|today|what day)', msg):
@@ -99,9 +97,6 @@ class ToolUse:
                 return topic
         return None
 
-    # ------------------------------------------------------------------
-    # Tool execution
-    # ------------------------------------------------------------------
     async def execute_tool(self, tool_spec: Dict) -> str:
         tool = tool_spec.get("tool")
         try:
@@ -114,7 +109,13 @@ class ToolUse:
                 query = tool_spec.get("query", "")
                 if not query:
                     return "No search query provided."
-                return await self._web_search(query)
+                result = await self._web_search(query)
+                if "No results found" in result:
+                    # Also get suggestions
+                    suggestions = await self._get_search_suggestions(query)
+                    if suggestions:
+                        result += f"\n\nTry these alternative searches:\n• " + "\n• ".join(suggestions[:3])
+                return result
             elif tool == "current_time":
                 return await self._get_current_time()
             elif tool == "wikipedia":
@@ -128,9 +129,6 @@ class ToolUse:
             logger.exception(f"Tool execution error: {e}")
             return f"Tool error: {str(e)}"
 
-    # ------------------------------------------------------------------
-    # Calculator (safe)
-    # ------------------------------------------------------------------
     async def _safe_calculate(self, expression: str) -> str:
         try:
             result = simple_eval(expression)
@@ -140,15 +138,11 @@ class ToolUse:
         except Exception as e:
             return f"Could not calculate '{expression}': {str(e)}"
 
-    # ------------------------------------------------------------------
-    # Web search (DuckDuckGo Lite with retries & fallback to direct HTML)
-    # ------------------------------------------------------------------
     async def _web_search(self, query: str, max_results: int = 3) -> str:
-        """Search DuckDuckGo using the lite version with retry."""
-        # First try: use the same lite endpoint but with proper query encoding
+        """Search DuckDuckGo main HTML (more robust)."""
         for attempt in range(2):
             try:
-                url = "https://lite.duckduckgo.com/lite/"
+                url = "https://html.duckduckgo.com/html/"
                 params = {"q": query}
                 session = await self._get_session()
                 async with session.get(url, params=params, timeout=15) as resp:
@@ -156,15 +150,16 @@ class ToolUse:
                         html = await resp.text()
                         soup = BeautifulSoup(html, 'html.parser')
                         results = []
-                        for snippet_row in soup.find_all('tr', class_='result-snippet'):
-                            link_row = snippet_row.find_previous_sibling('tr', class_='result-link')
-                            if not link_row:
-                                continue
-                            link_tag = link_row.find('a')
-                            if not link_tag:
-                                continue
-                            title = link_tag.get_text(strip=True)
-                            snippet = snippet_row.get_text(strip=True)
+                        # Main results are in <a class="result__a">
+                        for result_link in soup.select('a.result__a'):
+                            title = result_link.get_text(strip=True)
+                            # Find parent .result__snippet
+                            snippet_tag = result_link.find_parent('div', class_='result')
+                            if snippet_tag:
+                                snippet_div = snippet_tag.find('a', class_='result__snippet')
+                            else:
+                                snippet_div = None
+                            snippet = snippet_div.get_text(strip=True) if snippet_div else ""
                             results.append({"title": title, "snippet": snippet})
                             if len(results) >= max_results:
                                 break
@@ -172,19 +167,31 @@ class ToolUse:
                             formatted = [f"• {r['title']}\n  {r['snippet'][:300]}" for r in results]
                             return f"Search results for '{query}':\n\n" + "\n\n".join(formatted)
                         else:
-                            # No results, maybe try again with a different approach
-                            if attempt == 0:
-                                await asyncio.sleep(1)
-                                continue
-                            return f"No results found for '{query}'. Try a different search term."
+                            await asyncio.sleep(1)
+                            continue
+                    else:
+                        logger.warning(f"HTTP {resp.status} for {query}")
+                        await asyncio.sleep(1)
             except Exception as e:
                 logger.warning(f"Search attempt {attempt+1} failed: {e}")
                 await asyncio.sleep(1)
-        return f"Web search temporarily unavailable. Please try again later."
+        return f"No results found for '{query}'."
 
-    # ------------------------------------------------------------------
-    # Time and Wikipedia
-    # ------------------------------------------------------------------
+    async def _get_search_suggestions(self, query: str) -> List[str]:
+        """Get related search suggestions from DuckDuckGo's suggestions API."""
+        try:
+            url = f"https://duckduckgo.com/ac/?q={query}&type=list"
+            session = await self._get_session()
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Format: [{"phrase": "suggestion1"}, ...]
+                    suggestions = [item['phrase'] for item in data if 'phrase' in item]
+                    return suggestions[:5]
+        except Exception as e:
+            logger.debug(f"Suggestions failed: {e}")
+        return []
+
     async def _get_current_time(self) -> str:
         now = datetime.now()
         return f"Current local time is {now.strftime('%A, %B %d, %Y at %I:%M %p')}"
@@ -206,13 +213,16 @@ class ToolUse:
         wikipedia.set_lang("en")
         return wikipedia.summary(topic, sentences=sentences)
 
-    # ------------------------------------------------------------------
-    # Result injection
-    # ------------------------------------------------------------------
     async def inject_tool_result(self, original_response: str, tool_result: str) -> str:
+        """Cleaner injection – only if tool result is meaningful and different from original."""
+        if not tool_result or tool_result.startswith("Tool error"):
+            # Do not inject error messages that break conversation
+            return original_response
+        # Avoid duplication
         if "[System tool result:" in original_response:
             return original_response
-        return f"{original_response}\n\n[System tool result: {tool_result}]"
+        # Append on a new line
+        return f"{original_response}\n\n{tool_result}"
 
     async def close(self):
         if self._session and not self._session.closed:
