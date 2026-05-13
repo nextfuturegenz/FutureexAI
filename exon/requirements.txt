@@ -8,3 +8,6 @@ pydantic==2.5.0
 duckduckgo-search==6.3.0
 wikipedia==1.4.0
 simpleeval==1.0.0
+sentence-transformers==2.7.0
+pgvector==0.2.5
+numpy==1.26.4
