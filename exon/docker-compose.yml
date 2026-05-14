@@ -15,7 +15,7 @@ services:
       - OLLAMA_HOST=http://localhost:11434
       - OLLAMA_MODEL=phi3:mini
       - EXON_ID=EXN-001
-      - KNOWLEDGE_DIR=/app/knowledge
+      - KNOWLEDGE_DIR=/app/exon/knowledge
     volumes:
       - ../:/app
     restart: unless-stopped
