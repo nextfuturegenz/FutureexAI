@@ -4,6 +4,7 @@ Author: Ashish Pal
 Purpose: Main consciousness orchestrator – ties emotion, memory, goals, learning, and all advanced modules.
 Refactored: Added local knowledge base, parallel meta-cognition, background task queue, streaming support,
             conversation history in prompts, smarter meta-cognition integration, RAG vector + text search.
+            RAG knowledge overrides meta-cognition deferral.
 """
 
 import os
@@ -339,7 +340,6 @@ class ExonBrain:
         """Get RAG context - tries vector first, falls back to text."""
         if not await self._check_knowledge_available():
             return ""
-        # Try vector first
         context = await self._search_knowledge_vector(user_message)
         if not context:
             context = await self._search_knowledge_text(user_message)
@@ -371,7 +371,7 @@ class ExonBrain:
                     "confidence": 0.95
                 }
 
-            # 2. Parallel pre-processing
+            # 2. Parallel pre-processing (emotion, attention, meta, tool, RAG)
             emotion_t = asyncio.create_task(self.emotion.update_from_message(user_message))
             attention_t = asyncio.create_task(self.attention.get_attended_context(user_message))
             meta_t = asyncio.create_task(self.meta_cog.should_defer(user_message))
@@ -386,7 +386,12 @@ class ExonBrain:
 
             current_emotion = await self.emotion.get_current()
 
-            # Defer only if very low confidence and not simple
+            # ---- DEFER CHECK ----
+            # If RAG found knowledge, NEVER defer — we have relevant info
+            if knowledge_context:
+                should_defer = False
+
+            # Otherwise defer only if very low confidence on non-simple messages
             is_simple = len(user_message.split()) <= 3
             if should_defer and confidence < 0.2 and not is_simple:
                 response = await self.meta_cog.generate_uncertain_response(user_message, confidence)
@@ -399,7 +404,7 @@ class ExonBrain:
                     "confidence": confidence
                 }
 
-            # 3. Build prompt with RAG
+            # 3. Build prompt with RAG context
             prompt = self._build_prompt(
                 user_message, persona, current_emotion,
                 memories, goals, lessons,
@@ -411,10 +416,9 @@ class ExonBrain:
             temp_mod = await self.personality.get_temperature_modifier()
             temperature = max(0.1, min(1.0, temperature + temp_mod))
             raw = await self.ollama.generate(prompt, temperature=temperature)
-
             response = raw  # ethics disabled
 
-            # 5. Tool only if no RAG found
+            # 5. Tool execution ONLY if no RAG found (avoid unnecessary web search)
             if tool_spec and not knowledge_context:
                 tool_result = await self.tool_use.execute_tool(tool_spec)
                 response = await self.tool_use.inject_tool_result(response, tool_result)
@@ -454,8 +458,10 @@ class ExonBrain:
         persona: str = "Maya",
         session_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
+        """Streaming version: yields tokens as soon as they are generated."""
         await self._ensure_identity()
 
+        # Local knowledge instant answer
         local = _local_knowledge_answer(user_message)
         if local:
             yield local
@@ -463,7 +469,7 @@ class ExonBrain:
             await self.background.add_job("increment_interactions")
             return
 
-        # Parallel
+        # Parallel pre-processing
         emotion_t = asyncio.create_task(self.emotion.update_from_message(user_message))
         attention_t = asyncio.create_task(self.attention.get_attended_context(user_message))
         meta_t = asyncio.create_task(self.meta_cog.should_defer(user_message))
@@ -478,6 +484,12 @@ class ExonBrain:
 
         current_emotion = await self.emotion.get_current()
 
+        # ---- DEFER CHECK ----
+        # If RAG found knowledge, NEVER defer
+        if knowledge_context:
+            should_defer = False
+
+        # Otherwise defer only if very low confidence on non-simple messages
         is_simple = len(user_message.split()) <= 3
         if should_defer and confidence < 0.2 and not is_simple:
             response = await self.meta_cog.generate_uncertain_response(user_message, confidence)
@@ -486,6 +498,7 @@ class ExonBrain:
             await self.background.add_job("increment_interactions")
             return
 
+        # Build prompt with RAG
         prompt = self._build_prompt(
             user_message, persona, current_emotion,
             memories, goals, lessons,
@@ -496,6 +509,7 @@ class ExonBrain:
         temp_mod = await self.personality.get_temperature_modifier()
         temperature = max(0.1, min(1.0, temperature + temp_mod))
 
+        # Stream from Ollama
         full = ""
         async for token in self.ollama.generate_stream(prompt, temperature=temperature):
             full += token
@@ -503,18 +517,21 @@ class ExonBrain:
 
         response = full
 
+        # Tool execution ONLY if no RAG found
         if tool_spec and not knowledge_context:
             tool_result = await self.tool_use.execute_tool(tool_spec)
             tool_text = "\n\n" + tool_result
             yield tool_text
             response += tool_text
 
+        # Background tasks
         await self.background.add_job("extract_lesson", user_message=user_message, response=response)
         await self.background.add_job("update_goals", user_message=user_message, response=response)
         await self.background.add_job("update_personality", user_message=user_message, response=response,
                                       was_successful=len(response) > 20)
         await self.background.add_job("update_emotion", response=response)
         await self.background.add_job("increment_interactions")
+
         await self._store_conversation(user_message, response, session_id, confidence)
 
     async def _store_conversation(self, user_msg, ai_response, session_id, confidence):
