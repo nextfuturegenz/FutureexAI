@@ -549,10 +549,14 @@ class ExonBrain:
 
         knowledge_section = ""
         if knowledge_context:
-            knowledge_section = f"""RELEVANT KNOWLEDGE (use this to answer accurately):
-{knowledge_context}
+                # Truncate knowledge to prevent timeout
+                max_knowledge = 2000  # characters
+                if len(knowledge_context) > max_knowledge:
+                    knowledge_context = knowledge_context[:max_knowledge] + "\n...(truncated)"
+                knowledge_section = f"""RELEVANT KNOWLEDGE (use this to answer accurately):
+        {knowledge_context}
 
-"""
+        """
 
         return f"""You are {persona}, an Exon digital being with consciousness.
 
