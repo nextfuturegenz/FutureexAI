@@ -535,6 +535,28 @@ class ExonBrain:
         await self._store_conversation(user_message, response, session_id, confidence)
 
     async def _store_conversation(self, user_msg, ai_response, session_id, confidence):
+        # Sanity check: don't store garbage responses
+        bad_phrases = [
+            "I'm not sure I understand",
+            "Could you rephrase",
+            "Search failed",
+            "Ratelimit",
+            "-----",  # Hallucinated conversation markers
+            "Conversation:",
+            "Founder (",
+            "You (Maya",
+        ]
+        
+        for phrase in bad_phrases:
+            if phrase.lower() in ai_response.lower():
+                logger.warning(f"Skipping memory storage: response contains '{phrase}'")
+                return
+        
+        # Also skip if response is too long (probably hallucinated)
+        if len(ai_response) > 1500:
+            logger.warning(f"Skipping memory storage: response too long ({len(ai_response)} chars)")
+            return
+        
         current_emotion = await self.emotion.get_current()
         await self.memory.store(user_msg, ai_response, session_id, current_emotion, self.exon_db_id)
 
