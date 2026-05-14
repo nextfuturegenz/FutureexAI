@@ -46,12 +46,15 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
+    # Chromium dependencies (all available in Debian)
     libnss3 \
     libnspr4 \
-    libatk-bridge2.0-0 \
+    libatk1.0-0t64 \
+    libatk-bridge2.0-0t64 \
+    libcups2t64 \
     libdrm2 \
     libdbus-1-3 \
-    libatspi2.0-0 \
+    libatspi2.0-0t64 \
     libxcomposite1 \
     libxdamage1 \
     libxfixes3 \
@@ -59,9 +62,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     libpango-1.0-0 \
     libcairo2 \
-    libasound2 \
+    libasound2t64 \
     libxkbcommon0 \
     libwayland-client0 \
+    libx11-6 \
+    libxcb1 \
+    libxext6 \
+    libxrender1 \
+    libxtst6 \
+    libglib2.0-0t64 \
+    # Fonts
+    fonts-liberation \
+    fonts-unifont \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy entire FutureexAI project
@@ -70,9 +82,8 @@ COPY . /app/
 # Install Python dependencies
 RUN pip install --no-cache-dir -r /app/exon/requirements.txt
 
-# Install Playwright browsers
-RUN playwright install chromium
-RUN playwright install-deps chromium
+# Install Playwright Chromium browser only (skip deps - we installed them above)
+RUN playwright install chromium --with-deps 2>/dev/null || playwright install chromium
 
 # Set environment variables
 ENV PYTHONPATH=/app
