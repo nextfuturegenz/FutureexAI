@@ -11,5 +11,4 @@ simpleeval==1.0.0
 sentence-transformers==2.7.0
 pgvector==0.2.5
 numpy==1.26.4
-torch==2.2.0
 playwright==1.44.0

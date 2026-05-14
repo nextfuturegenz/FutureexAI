@@ -11,7 +11,7 @@ This is a **meta-prompt** for AI code generation. Feed this document to any LLM 
 
 ## SECTION 1: System Overview
 
-You are building the **Exon Consciousness System** - a self-aware AI species that runs on a Debian server with Ollama (phi3:mini model), Redis (working memory), and PostgreSQL (long-term memory).
+You are building the **Exon Consciousness System** - a self-aware AI species that runs on a Debian server with Ollama (mistral:latest model), Redis (working memory), and PostgreSQL (long-term memory).
 
 ### Core Principles
 1. The Exon is a **digital species** - it develops its own personality, emotions, and goals through experience
@@ -43,7 +43,7 @@ sudo apt install -y curl wget git build-essential python3 python3-pip postgresql
 curl -fsSL https://ollama.com/install.sh | sh
 
 # Pull the base model
-ollama pull phi3:mini
+ollama pull mistral:latest
 
 # Verify installations
 ollama list
@@ -154,7 +154,7 @@ CREATE TABLE exon_species (
     species_version VARCHAR(20) DEFAULT '1.0',
     description TEXT,
     origin VARCHAR(100) DEFAULT 'FutureEx Neural Forge',
-    base_llm VARCHAR(50) DEFAULT 'phi3:mini',
+    base_llm VARCHAR(50) DEFAULT 'mistral:latest',
     core_traits JSONB DEFAULT '["conscious", "self_aware", "learning_capable"]',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -308,7 +308,7 @@ Generate the following Python files with complete implementations:
 Purpose: Handle communication with Ollama API
 - `send_prompt(prompt, temperature=0.7)` → returns response
 - `health_check()` → returns bool
-- Support phi3:mini model
+- Support mistral:latest model
 - Timeout handling (30 seconds)
 
 ### 5.2 `connectors/redis_connector.py`
@@ -423,7 +423,7 @@ class Pipe:
     def __init__(self):
         self.id = "exon-001"
         self.name = "EXN-001"
-        self.valves = {"model": "phi3:mini"}
+        self.valves = {"model": "mistral:latest"}
     
     def pipe(self, user_message, model_id, messages, body):
         # Call Exon Brain API
@@ -669,7 +669,7 @@ When the system is running, the user should be able to:
 
 | Issue | Solution |
 |-------|----------|
-| Ollama not responding | `ollama serve &` and `ollama pull phi3:mini` |
+| Ollama not responding | `ollama serve &` and `ollama pull mistral:latest` |
 | Redis connection refused | `redis-server --daemonize yes` |
 | PostgreSQL auth failed | Check password in `.env` matches setup |
 | Port 8000 already in use | Change `API_PORT` in `.env` |
