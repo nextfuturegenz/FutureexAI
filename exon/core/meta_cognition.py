@@ -1,34 +1,46 @@
 """
 File: /opt/futureex/exon/core/meta_cognition.py
 Author: Ashish Pal
-Purpose: Monitor confidence, extract numeric score from LLM response.
-Refactored: Smarter confidence estimation with keyword boosting, lower default threshold.
+Purpose: Confidence estimation – called only for complex messages now (brain guards it).
+Refactored v3:
+  - Added structured DEBUG logging with timing
+  - Raised keyword boost cap
+  - Lowered defer threshold to 0.2 (was 0.3) to reduce false deferrals
+  - Simple-message guard returns early (no Ollama call)
 """
 
 import re
 import logging
+import time
 from typing import Tuple
 import redis.asyncio as redis
 from exon.connectors.ollama_bridge import OllamaBridge
 
 logger = logging.getLogger(__name__)
 
-CONFIDENCE_PROMPT = """Based on your knowledge and the conversation history, how confident are you that you can accurately answer this user query?  
-Reply with a single number between 0 and 1 (0=no confidence, 1=very confident). Output ONLY the number, nothing else.
+CONFIDENCE_PROMPT = (
+    "How confident are you that you can accurately answer this query?\n"
+    "Reply with ONLY a single number between 0 and 1. No explanation.\n\n"
+    'Query: "{query}"\nConfidence:'
+)
 
-User query: "{query}"
-Confidence (0-1):"""
-
-# Keywords that suggest the message is simple and doesn't need high confidence
-SIMPLE_GREETINGS = {"hello", "hi", "hey", "yo", "sup", "hola", "good morning", "good afternoon", "good evening"}
-SIMPLE_RESPONSES = {"ok", "okay", "thanks", "thank you", "bye", "goodbye", "see you", "yes", "no", "sure", "fine", "cool", "nice", "great"}
-COMMON_TOPICS = {
-    "weather", "time", "date", "day", "name", "age", "how are you", "what's up",
-    "who are you", "what are you", "tell me about yourself", "help", "what can you do",
-    "capital", "president", "prime minister", "population", "color", "food", "music",
-    "movie", "book", "sport", "animal", "country", "city", "language", "computer",
-    "phone", "car", "house", "job", "school", "university", "family", "friend"
+SIMPLE_GREETINGS = {
+    "hello", "hi", "hey", "yo", "sup", "hola",
+    "good morning", "good afternoon", "good evening",
 }
+SIMPLE_RESPONSES = {
+    "ok", "okay", "thanks", "thank you", "bye", "goodbye",
+    "see you", "yes", "no", "sure", "fine", "cool", "nice", "great",
+}
+COMMON_TOPICS = {
+    "weather", "time", "date", "day", "name", "age", "how are you",
+    "what's up", "who are you", "what are you", "tell me about yourself",
+    "help", "what can you do", "capital", "president", "prime minister",
+    "population", "color", "food", "music", "movie", "book", "sport",
+    "animal", "country", "city", "language", "computer", "phone",
+    "car", "house", "job", "school", "university", "family", "friend",
+}
+
 
 class MetaCognition:
     def __init__(self, exon_id: str, redis_client: redis.Redis, ollama: OllamaBridge):
@@ -37,93 +49,93 @@ class MetaCognition:
         self.ollama = ollama
 
     def _is_simple_message(self, user_message: str) -> bool:
-        """Check if the message is a simple greeting or short response."""
-        msg_lower = user_message.strip().lower().rstrip('?!.')
-        
-        # Very short messages (1-2 words) are usually simple
-        word_count = len(msg_lower.split())
-        if word_count <= 2:
+        msg_lower = user_message.strip().lower().rstrip("?!.")
+        if len(msg_lower.split()) <= 2:
+            logger.debug(f"[meta_cog] simple (word count ≤2): '{msg_lower}'")
             return True
-        
-        # Check against known simple greetings/responses
         if msg_lower in SIMPLE_GREETINGS or msg_lower in SIMPLE_RESPONSES:
+            logger.debug(f"[meta_cog] simple (exact match greeting/response): '{msg_lower}'")
             return True
-        
-        # Check if message starts with a simple phrase
         for simple in SIMPLE_GREETINGS | SIMPLE_RESPONSES:
             if msg_lower.startswith(simple):
+                logger.debug(f"[meta_cog] simple (starts with greeting): '{msg_lower}'")
                 return True
-        
         return False
 
     def _get_keyword_boost(self, user_message: str) -> float:
-        """Boost confidence if message contains common topics."""
         msg_lower = user_message.lower()
         boost = 0.0
-        
-        # Check for common easy topics
         for topic in COMMON_TOPICS:
             if topic in msg_lower:
                 boost += 0.05
-        
-        # Check for question words (suggests factual query)
-        question_words = {"what", "who", "where", "when", "how", "why", "which", "whose", "whom"}
+        question_words = {"what", "who", "where", "when", "how", "why", "which"}
         for qw in question_words:
             if qw in msg_lower:
                 boost += 0.03
-        
-        # Longer, well-formed questions get more boost
         if "?" in user_message and len(msg_lower.split()) > 3:
             boost += 0.05
-        
-        return min(0.3, boost)  # Cap the boost
+        capped = min(0.35, boost)
+        if capped > 0:
+            logger.debug(f"[meta_cog] keyword boost: {capped:.2f}")
+        return capped
 
     async def estimate_confidence(self, user_message: str) -> float:
-        """Return confidence score (0-1) with keyword boosting."""
-        
-        # Simple messages get high confidence without LLM call
         if self._is_simple_message(user_message):
-            logger.debug(f"Simple message detected, skipping LLM confidence check: {user_message[:50]}")
+            logger.debug("[meta_cog] simple message → confidence=0.9 (no LLM call)")
             return 0.9
-        
+
+        t0 = time.perf_counter()
         try:
-            prompt = CONFIDENCE_PROMPT.format(query=user_message[:500])
-            response = await self.ollama.generate(prompt, temperature=0.2)
-            # Extract first floating point number from response
+            prompt = CONFIDENCE_PROMPT.format(query=user_message[:400])
+            logger.debug(f"[meta_cog] calling Ollama for confidence…")
+            response = await self.ollama.generate(prompt, temperature=0.1)
+            elapsed = (time.perf_counter() - t0) * 1000
+            logger.debug(f"[meta_cog] Ollama confidence raw='{response.strip()[:30]}' "
+                         f"in {elapsed:.0f}ms")
+
             match = re.search(r"[-+]?\d*\.\d+|\d+", response.strip())
             if match:
                 confidence = float(match.group())
                 confidence = min(1.0, max(0.0, confidence))
             else:
-                logger.warning(f"No numeric confidence found in: {response[:100]}")
+                logger.warning(f"[meta_cog] no numeric confidence found: '{response[:60]}'")
                 confidence = 0.5
-            
-            # Apply keyword boost
+
             boost = self._get_keyword_boost(user_message)
-            confidence = min(1.0, confidence + boost)
-            
-            logger.debug(f"Confidence for '{user_message[:50]}': {confidence:.2f} (boost: {boost:.2f})")
-            return confidence
-            
+            final = min(1.0, confidence + boost)
+            logger.debug(f"[meta_cog] confidence={confidence:.2f} + boost={boost:.2f} "
+                         f"→ final={final:.2f}")
+            return final
+
         except Exception as e:
-            logger.warning(f"Confidence estimation failed: {e}")
-            # If LLM fails, check if it's a simple message
+            elapsed = (time.perf_counter() - t0) * 1000
+            logger.warning(f"[meta_cog] confidence estimation failed after {elapsed:.0f}ms: {e}")
             if self._is_simple_message(user_message):
                 return 0.8
             return 0.5
 
-    async def should_defer(self, user_message: str, threshold: float = 0.3) -> Tuple[bool, float]:
-        """Check if we should defer (low confidence). Threshold lowered to 0.3."""
+    async def should_defer(
+        self, user_message: str, threshold: float = 0.2
+    ) -> Tuple[bool, float]:
+        """
+        Threshold lowered to 0.2 (was 0.3) to reduce false deferrals.
+        Called only for complex messages from brain.py.
+        """
         conf = await self.estimate_confidence(user_message)
-        return (conf < threshold, conf)
+        defer = conf < threshold
+        logger.debug(f"[meta_cog] should_defer={defer} conf={conf:.2f} threshold={threshold}")
+        return defer, conf
 
-    async def generate_uncertain_response(self, user_message: str, confidence: float) -> str:
-        """Generate contextual uncertain response based on confidence level."""
+    async def generate_uncertain_response(
+        self, user_message: str, confidence: float
+    ) -> str:
+        logger.debug(f"[meta_cog] generating uncertain response (conf={confidence:.2f})")
         if confidence < 0.1:
-            return "I'm not sure I understand that. Could you rephrase or provide more context?"
-        elif confidence < 0.2:
-            return "I have very limited knowledge about that. Could you try asking differently?"
-        elif confidence < 0.3:
-            return "I'm not entirely confident, but let me try... Actually, I'd rather be honest and say I'm not sure about this one. Could you ask something else?"
+            return ("I'm not sure I understand that. "
+                    "Could you rephrase or provide more context?")
+        elif confidence < 0.15:
+            return ("I have very limited knowledge about that. "
+                    "Could you try asking differently?")
         else:
-            return "I'll try my best to answer, though I'm still learning. Take my response with a pinch of salt."
+            return ("I'm not entirely confident here – I'd rather be honest. "
+                    "Could you give me more context?")
