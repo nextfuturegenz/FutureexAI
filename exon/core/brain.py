@@ -314,38 +314,73 @@ class ExonBrain:
             self._knowledge_available = False
             return False
 
+    # async def _search_knowledge_vector(self, query: str, top_k: int = 3) -> str:
+    #     model = await self._get_embedding_model()
+    #     if model is None:
+    #         return ""
+    #     t0 = time.perf_counter()
+    #     try:
+    #         query_embedding = model.encode([query])[0]
+    #         with self.pg_conn.cursor() as cur:
+    #             cur.execute(
+    #                 """
+    #                 SELECT chunk_text, source_file,
+    #                        1 - (embedding <=> %s::vector) AS similarity
+    #                 FROM exon_knowledge
+    #                 WHERE exon_id = %s
+    #                 ORDER BY embedding <=> %s::vector
+    #                 LIMIT %s
+    #                 """,
+    #                 (query_embedding.tolist(), self.exon_id,
+    #                  query_embedding.tolist(), top_k),
+    #             )
+    #             results = cur.fetchall()
+    #         parts = [
+    #             f"[{src}]: {txt[:500]}"
+    #             for txt, src, sim in results
+    #             if sim > 0.3
+    #         ]
+    #         elapsed = (time.perf_counter() - t0) * 1000
+    #         logger.debug(f"[rag] vector search: {len(parts)} hits in {elapsed:.0f}ms "
+    #                      f"(top_sim={results[0][2]:.3f if results else 0})")
+    #         return "\n\n".join(parts)
+    #     except Exception as e:
+    #         logger.error(f"[rag] vector search failed: {e}")
+    #         return ""
+
     async def _search_knowledge_vector(self, query: str, top_k: int = 3) -> str:
+        """Vector similarity search using pgvector."""
         model = await self._get_embedding_model()
         if model is None:
             return ""
-        t0 = time.perf_counter()
         try:
             query_embedding = model.encode([query])[0]
             with self.pg_conn.cursor() as cur:
-                cur.execute(
-                    """
+                cur.execute("""
                     SELECT chunk_text, source_file,
-                           1 - (embedding <=> %s::vector) AS similarity
+                        1 - (embedding <=> %s::vector) AS similarity
                     FROM exon_knowledge
                     WHERE exon_id = %s
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
-                    """,
-                    (query_embedding.tolist(), self.exon_id,
-                     query_embedding.tolist(), top_k),
-                )
+                """, (query_embedding.tolist(), self.exon_id,
+                    query_embedding.tolist(), top_k))
                 results = cur.fetchall()
-            parts = [
-                f"[{src}]: {txt[:500]}"
-                for txt, src, sim in results
-                if sim > 0.3
-            ]
-            elapsed = (time.perf_counter() - t0) * 1000
-            logger.debug(f"[rag] vector search: {len(parts)} hits in {elapsed:.0f}ms "
-                         f"(top_sim={results[0][2]:.3f if results else 0})")
-            return "\n\n".join(parts)
+            
+            if not results:
+                return ""
+            
+            parts = []
+            for chunk_text, source_file, similarity in results:
+                if similarity > 0.3:
+                    parts.append(f"[{source_file}]: {chunk_text[:500]}")
+            
+            if parts:
+                logger.info(f"🔍 Vector RAG: {len(parts)} chunks (top sim={results[0][2]:.3f})")
+                return "\n\n".join(parts)
+            return ""
         except Exception as e:
-            logger.error(f"[rag] vector search failed: {e}")
+            logger.error(f"Vector search failed: {e}")
             return ""
 
     async def _search_knowledge_text(self, query: str, top_k: int = 3) -> str:

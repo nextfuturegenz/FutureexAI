@@ -433,6 +433,18 @@ class ToolUse:
     async def detect_tool_intent(self, user_message: str, response: str = "") -> Optional[Dict]:
         msg = user_message.lower()
 
+            # Skip web search for emotional/greeting questions
+        emotional_patterns = [
+            r'how are you',
+            r'how do you feel',
+            r'how is your day',
+            r'what\'s up',
+            r'how are things',
+        ]
+        for pattern in emotional_patterns:
+            if re.search(pattern, msg):
+                return None  # Don't trigger any tool for these
+
         # --- Calculator ---
         calc_words = ["calculate", "compute", "solve", "math"]
         if any(w in msg for w in calc_words) or re.search(r'[\d]+\s*[\+\-\*\/]\s*[\d]+', msg):
