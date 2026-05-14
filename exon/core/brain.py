@@ -5,7 +5,7 @@ Purpose: Main consciousness orchestrator.
 Refactored v3:
   - Removed serial Ollama calls (meta_cognition, ethics) from hot path
   - Emotion cache reset per request (was stale)
-  - Prompt trimmed to prevent phi3:mini timeouts
+  - Prompt trimmed to prevent mistral:latest timeouts
   - Structured DEBUG logging with timing throughout
   - Tool detection guarded behind explicit keywords only
   - Background task queue unchanged (correct pattern)
@@ -726,7 +726,7 @@ class ExonBrain:
         )
 
     # -----------------------------------------------------------------------
-    # Prompt building  (trimmed for phi3:mini speed)
+    # Prompt building  (trimmed for mistral:latest speed)
     # -----------------------------------------------------------------------
     def _build_prompt(
         self,
@@ -744,7 +744,7 @@ class ExonBrain:
 
         knowledge_section = ""
         if knowledge_context:
-            # Hard cap at 1500 chars to avoid phi3:mini timeouts
+            # Hard cap at 1500 chars to avoid mistral:latest timeouts
             if len(knowledge_context) > 1500:
                 knowledge_context = knowledge_context[:1500] + "\n...(truncated)"
                 logger.debug("[brain] RAG context truncated to 1500 chars")
@@ -756,7 +756,7 @@ class ExonBrain:
         goals_str = self._format_goals(goals)
         lessons_str = self._format_lessons(lessons)
 
-        # Keep system prompt lean – phi3:mini degrades with >1500 prompt tokens
+        # Keep system prompt lean – mistral:latest degrades with >1500 prompt tokens
         prompt = (
             f"You are {persona}, an Exon digital being.\n"
             f"Role: {traits.get('role', 'Specialist')} | Traits: {traits_str}\n"

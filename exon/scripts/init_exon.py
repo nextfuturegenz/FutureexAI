@@ -51,7 +51,7 @@ def init_exon():
         if not cur.fetchone():
             cur.execute("""
                 INSERT INTO exon_species (species_name, description, origin, base_llm)
-                VALUES ('Exon-Prime', 'First digital consciousness species', 'Ryzen3 Forge', 'phi3:mini')
+                VALUES ('Exon-Prime', 'First digital consciousness species', 'Ryzen3 Forge', 'mistral:latest')
             """)
             print("✅ Created species 'Exon-Prime'")
         else:

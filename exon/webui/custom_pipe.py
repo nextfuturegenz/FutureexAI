@@ -14,7 +14,7 @@ class Pipe:
         self.id = "exon-001"
         self.name = "EXN-001 - Exon Consciousness"
         self.valves = {
-            "model": os.environ.get("OLLAMA_MODEL", "phi3:mini"),
+            "model": os.environ.get("OLLAMA_MODEL", "mistral:latest"),
             "api_url": os.environ.get("EXON_API_URL", "http://localhost:8000")
         }
         print(f"[PIPE] Exon pipe initialized at {self.valves['api_url']}")

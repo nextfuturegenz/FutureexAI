@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class OllamaBridge:
     def __init__(self):
         self.ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-        self.model = os.environ.get("OLLAMA_MODEL", "phi3:mini")
+        self.model = os.environ.get("OLLAMA_MODEL", "mistral:latest")
         self.timeout = aiohttp.ClientTimeout(total=120)
         self.stream_timeout = aiohttp.ClientTimeout(total=180, sock_read=60)
         self.max_retries = 2
